@@ -1,0 +1,66 @@
+--- a/src/apprt/gtk/class/application.zig
++++ b/src/apprt/gtk/class/application.zig
+@@ -50,8 +50,6 @@
+ 
+ const log = std.log.scoped(.gtk_ghostty_application);
+ 
+-extern "c" fn setenv(name: ?[*]const u8, value: ?[*]const u8, overwrite: c_int) c_int;
+-
+ /// Function used to funnel GLib/GObject/GTK log messages into Zig's logging
+ /// system rather than just getting dumped directly to stderr.
+ fn glibLogWriterFunction(
+@@ -292,12 +290,12 @@
+         // Set the old language,
+         const saved_language: ?[:0]const u8 = saved_language: {
+             const old_language = old_language: {
+-                const lang = global.environ().getPosix("LANG") orelse break :old_language null;
+-                break :old_language alloc.dupeSentinel(u8, @ptrCast(lang), 0) catch null;
++                const lang = glib.getenv("LANG") orelse break :old_language null;
++                break :old_language alloc.dupeSentinel(u8, std.mem.span(lang), 0) catch null;
+             };
+             if (config.language) |language| {
+                 // Override LANG if we need to (sync global environs if so)
+-                _ = setenv("LANG", @ptrCast(language), 1);
++                _ = glib.setenv("LANG", language, 1);
+                 global.syncEnviron();
+             }
+             break :saved_language old_language;
+@@ -1432,11 +1430,15 @@
+     fn startupSignals(self: *Self) void {
+         const priv = self.private();
+         assert(priv.signal_source == null);
+-        priv.signal_source = glibunix.signalAdd(
+-            @backingInt(std.posix.SIG.USR2),
+-            handleSigusr2,
+-            self,
+-        );
++        priv.signal_source = switch (comptime builtin.os.tag) {
++            // GLib has no Unix signal support on Windows.
++            .windows => null,
++            else => glibunix.signalAdd(
++                @backingInt(std.posix.SIG.USR2),
++                handleSigusr2,
++                self,
++            ),
++        };
+     }
+ 
+     /// Setup our action map.
+@@ -3272,7 +3274,7 @@
+         try writer.writeByte(0);
+         const value = writer.buffered();
+         log.warn("setting GDK_DEBUG={s}", .{value[0 .. value.len - 1]});
+-        _ = setenv("GDK_DEBUG", @ptrCast(value[0 .. value.len - 1 :0]), 1);
++        _ = glib.setenv("GDK_DEBUG", value[0 .. value.len - 1 :0], 1);
+     }
+ 
+     {
+@@ -3289,7 +3291,7 @@
+         try writer.writeByte(0);
+         const value = writer.buffered();
+         log.warn("setting GDK_DISABLE={s}", .{value[0 .. value.len - 1]});
+-        _ = setenv("GDK_DISABLE", @ptrCast(value[0 .. value.len - 1 :0]), 1);
++        _ = glib.setenv("GDK_DISABLE", value[0 .. value.len - 1 :0], 1);
+     }
+ 
+     // Sync environ after altering system env

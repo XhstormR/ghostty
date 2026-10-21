@@ -1,0 +1,21 @@
+--- a/src/renderer/shadertoy.zig
++++ b/src/renderer/shadertoy.zig
+@@ -268,6 +268,18 @@
+                 options,
+                 c.SPVC_COMPILER_OPTION_GLSL_VERSION,
+                 GLSL_VERSION,
++            ) != c.SPVC_SUCCESS) {
++                return error.SpvcFailed;
++            }
++
++            // Shaders whose mainImage reads fragColor back get it as an
++            // inout parameter, which we'd otherwise pass an uninitialized
++            // temporary. Zero-initializing locals makes that well defined.
++            // Fixes: error(opengl): [1] (Shader Compiler: Other) 0:217(12): warning: `param' used uninitialized
++            if (c.spvc_compiler_options_set_bool(
++                options,
++                c.SPVC_COMPILER_OPTION_FORCE_ZERO_INITIALIZED_VARIABLES,
++                c.SPVC_TRUE,
+             ) != c.SPVC_SUCCESS) {
+                 return error.SpvcFailed;
+             }

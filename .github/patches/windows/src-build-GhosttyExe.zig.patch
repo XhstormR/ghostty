@@ -1,0 +1,16 @@
+--- a/src/build/GhosttyExe.zig
++++ b/src/build/GhosttyExe.zig
+@@ -19,7 +19,12 @@
+             .optimize = cfg.optimize,
+             .strip = cfg.strip,
+             .omit_frame_pointer = cfg.omitFramePointer(),
+-            .unwind_tables = if (cfg.strip) .none else .sync,
++            // Windows requires unwind tables for SEH, and the MinGW CRT
++            // fails to build without them.
++            .unwind_tables = if (cfg.strip and cfg.target.result.os.tag != .windows)
++                .none
++            else
++                .sync,
+         }),
+         // Crashes on x86_64 self-hosted on 0.15.1
+         .use_llvm = true,

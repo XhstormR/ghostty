@@ -1,0 +1,48 @@
+--- a/src/apprt/gtk/build/gresource.zig
++++ b/src/apprt/gtk/build/gresource.zig
+@@ -4,6 +4,7 @@
+ //! This binary is expected to be run from the Ghostty source root.
+ //! Litmus test: `src/apprt/gtk` should exist relative to the pwd.
+ 
++const builtin = @import("builtin");
+ const std = @import("std");
+ 
+ const build_info = @import("info.zig");
+@@ -126,7 +127,9 @@
+ 
+ pub fn main(init: std.process.Init) !void {
+     var buf: [4096]u8 = undefined;
+-    var stdout = std.Io.File.stdout().writer(init.io, &buf);
++    // stdout is a pipe. On Windows, a positional writer would try (and
++    // fail) to set the pipe's length in `end`.
++    var stdout = std.Io.File.stdout().writerStreaming(init.io, &buf);
+     const writer = &stdout.interface;
+     try writer.writeAll(
+         \\<?xml version="1.0" encoding="UTF-8"?>
+@@ -237,6 +240,14 @@
+         \\
+     , .{build_info.resource_path});
+ 
++    // On Windows, glib-compile-resources fails to spawn xmllint ("Failed
++    // to read from child pipe"). Stripping blanks only makes the resources
++    // smaller, so skip it there.
++    const preprocess = if (builtin.os.tag == .windows)
++        ""
++    else
++        " preprocess=\"xml-stripblanks\"";
++
+     const cwd: std.Io.Dir = .cwd();
+     inline for (blueprints) |bp| {
+         const source = std.fmt.comptimePrint("{s}/{d}.{d}/{s}.blp", .{
+@@ -253,9 +264,9 @@
+             bp.name,
+         });
+         try writer.print(
+-            \\    <file compressed="true" preprocess="xml-stripblanks" alias="{s}">{s}</file>
++            \\    <file compressed="true"{s} alias="{s}">{s}</file>
+             \\
+-        , .{ alias, alias });
++        , .{ preprocess, alias, alias });
+     }
+ 
+     try writer.writeAll(

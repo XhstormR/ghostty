@@ -1,0 +1,37 @@
+--- a/src/apprt/gtk/class/surface.zig
++++ b/src/apprt/gtk/class/surface.zig
+@@ -1,3 +1,4 @@
++const builtin = @import("builtin");
+ const std = @import("std");
+ const assert = @import("../../../quirks.zig").inlineAssert;
+ const Allocator = std.mem.Allocator;
+@@ -3380,7 +3381,13 @@
+             surface.displayUnrealized();
+         }
+ 
+-        // Unset our input method
++        // Unset our input method, focusing it out first. The IM
++        // multicontext drops its delegate without a focus-out, and the
++        // Win32 IME only removes its message filter on focus-out, so the
++        // filter would outlive the IME and run on freed memory. The next
++        // focus-enter focuses it back in.
++        // Fixes: error(glib): CRITICAL: Gtk: gtk_im_context_ime_message_filter: assertion 'GTK_IS_IM_CONTEXT_IME (data)' failed
++        priv.im_context.as(gtk.IMContext).focusOut();
+         priv.im_context.as(gtk.IMContext).setClientWidget(null);
+     }
+ 
+@@ -4069,7 +4076,13 @@
+             ) orelse return;
+ 
+             const alloc = Application.default().allocator();
+-            if (alloc.alloc(*gdk.ContentProvider, contents.len)) |providers| {
++            if (builtin.os.tag == .windows and text.len == 0) {
++                // GTK's Win32 clipboard hands empty text to g_utf8_to_utf16
++                // as NULL and then dereferences the result. Clear the
++                // clipboard instead, which is what copying nothing means.
++                // Fixes: error(glib): CRITICAL: GLib: g_utf8_to_utf16: assertion 'str != NULL' failed
++                _ = clipboard.setContent(null);
++            } else if (alloc.alloc(*gdk.ContentProvider, contents.len)) |providers| {
+                 // Note: we don't need to unref the individual providers
+                 // because new_union takes ownership of them.
+                 defer alloc.free(providers);

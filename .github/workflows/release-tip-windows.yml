@@ -1,0 +1,274 @@
+name: Release Tip (Windows)
+
+on:
+  workflow_dispatch:
+    inputs:
+      # Debug and ReleaseSafe keep symbols, safety checks and stack traces
+      # for diagnosing crashes. Only ReleaseFast builds are released.
+      optimize:
+        type: choice
+        options: [ReleaseFast, ReleaseSafe, Debug]
+        default: ReleaseFast
+  push:
+    branches: [main]
+    # Only build when a file that can reach the artifact changes. Later
+    # patterns override earlier ones, so this workflow and its patches are
+    # re-added after excluding the rest of .github.
+    paths:
+      - "**"
+      - "!.github/**"
+      - "!README.md"
+      - "!CONTRIBUTING.md"
+      - "!HACKING.md"
+      - "!PACKAGING.md"
+      - "!AI_POLICY.md"
+      - "!AGENTS.md"
+      - "!CLAUDE.md"
+      - "!Doxyfile"
+      - "!DoxygenLayout.xml"
+      - "!LICENSE"
+      - "!CODEOWNERS"
+      - "!.clang-format"
+      - "!.editorconfig"
+      - "!.envrc"
+      - "!.gitattributes"
+      - "!.gitignore"
+      - "!.mailmap"
+      - "!.prettierignore"
+      - "!.shellcheckrc"
+      - "!.swiftlint.yml"
+      - "!typos.toml"
+      - "!valgrind.supp"
+      - ".github/workflows/release-tip-windows.yml"
+      - ".github/patches/windows/**"
+
+# We must only run one release workflow at a time to prevent corrupting
+# our release artifacts.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      OPTIMIZE: ${{ inputs.optimize || 'ReleaseFast' }}
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      # Keep LF line endings so the patches apply and the shell
+      # integration scripts we bundle stay usable.
+      - name: Configure Git
+        shell: pwsh
+        run: git config --global core.autocrlf input
+
+      - name: Checkout code
+        uses: actions/checkout@v7.0.1
+
+      - name: Setup Zig
+        uses: xyzzylabs/setup-zig@v1.0.5
+        with:
+          # One build already fills ~2.4 GB, so the 2 GiB default wiped the
+          # cache before every save. Separate keys keep Debug builds out.
+          cache-size-limit: 4096
+          cache-key: ${{ env.OPTIMIZE }}
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2.33.0
+        with:
+          msystem: CLANG64
+          update: true
+          # Inherit the Windows PATH for git, gh and setup-zig's Zig. MSYS2's
+          # own directories still come first.
+          path-type: inherit
+          install: zip
+          pacboy: >-
+            adwaita-icon-theme:p
+            gtk4:p
+            libadwaita:p
+            libxml2:p
+            meson:p
+            ninja:p
+            pkgconf:p
+            python:p
+            python-gobject:p
+
+      # Windows support for the GTK apprt isn't upstream yet. Keep the
+      # source changes as patches so this fork can track upstream cleanly.
+      - name: Apply Windows Patches
+        run: git apply -v .github/patches/windows/*.patch
+
+      # Ghostty requires blueprint-compiler 0.20 or newer but MSYS2 only
+      # ships 0.18, so install a release from source. Zig can only spawn
+      # .exe/.cmd/.bat programs on Windows, so also add a .cmd shim for the
+      # installed Python script. Python on Windows reads files using the
+      # ANSI code page by default, so force UTF-8 mode for both.
+      - name: Setup blueprint-compiler
+        env:
+          BLUEPRINT_COMPILER_VERSION: 0.22.2
+          PYTHONUTF8: 1
+        run: |
+          src="$(cygpath -u "$RUNNER_TEMP")/blueprint-compiler"
+          git clone --depth 1 --branch "v${BLUEPRINT_COMPILER_VERSION}" \
+            https://github.com/GNOME/blueprint-compiler.git "$src"
+          meson setup --prefix="$(cygpath -m "$MINGW_PREFIX")" \
+            "$(cygpath -m "$src/build")" "$(cygpath -m "$src")"
+          meson install -C "$(cygpath -m "$src/build")"
+          printf '@"%%~dp0python.exe" -X utf8 "%%~dp0blueprint-compiler" %%*\r\n' \
+            > "$MINGW_PREFIX/bin/blueprint-compiler.cmd"
+          cmd //c "blueprint-compiler --version"
+
+      # The renderer needs desktop OpenGL on an EGL surfaceless display.
+      # ANGLE only provides OpenGL ES, but Mesa's EGL supports both on top
+      # of its d3d12 driver. MSYS2 builds Mesa without EGL, so use a
+      # prebuilt release instead. It's linked statically, so libEGL.dll
+      # only depends on system DLLs. Zig links "egl" through EGL.lib (see
+      # Setup import libraries). 7z comes from the runner image.
+      - name: Setup Mesa
+        env:
+          MESA_VERSION: 26.2.5
+          MESA_SHA256: 3be975a2244e655fbf86215da2c76b2fc4df6a814f779812171d65009012fd83
+        run: |
+          mesa="$(cygpath -u "$RUNNER_TEMP")/mesa"
+          mkdir -p "$mesa"
+          cd "$mesa"
+          curl -fsSLo mesa.7z \
+            "https://github.com/mmozeiko/build-mesa/releases/download/${MESA_VERSION}/mesa-d3d12-x64-${MESA_VERSION}.7z"
+          echo "${MESA_SHA256}  mesa.7z" | sha256sum -c
+          7z x mesa.7z libEGL.dll libEGL.lib libGLESv2.dll
+          cp libEGL.lib "$MINGW_PREFIX/lib/EGL.lib"
+
+      # Zig 0.17 rejects pkg-config C flags it doesn't recognize, so strip
+      # the ones MSYS2 adds (nix/devShell.nix does the same on Linux).
+      # MSYS2 has no egl.pc, so point "egl" at Mesa's libEGL. The EGL
+      # headers come from vendor/glad.
+      - name: Setup pkg-config
+        run: |
+          find "$MINGW_PREFIX/lib/pkgconfig" "$MINGW_PREFIX/share/pkgconfig" \
+            -name '*.pc' -exec sed -i \
+            -e 's/[[:space:]]-mms-bitfields//g' \
+            -e 's/[[:space:]]-mfpmath=sse -msse -msse2//g' {} +
+          cat > "$MINGW_PREFIX/lib/pkgconfig/egl.pc" << 'EOF'
+          prefix=${pcfiledir}/../..
+          libdir=${prefix}/lib
+
+          Name: egl
+          Description: EGL (provided by Mesa)
+          Version: 1.5
+          Libs: -L${libdir} -lEGL
+          Cflags:
+          EOF
+
+      # Zig looks for <name>.lib import libraries on Windows but not for
+      # MinGW's lib<name>.dll.a. Without this, libraries that only ship an
+      # import library aren't found, and the ones that also ship a static
+      # lib<name>.a (e.g. GLib) are silently linked statically.
+      - name: Setup import libraries
+        run: |
+          cd "$MINGW_PREFIX/lib"
+          for implib in lib*.dll.a; do
+            name="${implib#lib}"
+            name="${name%.dll.a}"
+            [ -e "$name.lib" ] || cp "$implib" "$name.lib"
+          done
+
+      # Zig doesn't search the MSYS2 prefix on its own, so make sure
+      # pkg-config reports its include and library directories too.
+      - name: Build Ghostty
+        env:
+          PKG_CONFIG_ALLOW_SYSTEM_CFLAGS: 1
+          PKG_CONFIG_ALLOW_SYSTEM_LIBS: 1
+        run: |
+          zig build \
+            -p "$(cygpath -m "$RUNNER_TEMP/ghostty")" \
+            -Dtarget=x86_64-windows-gnu \
+            -Dcpu=baseline \
+            -Doptimize="$OPTIMIZE" \
+            -Dapp-runtime=gtk \
+            -Dgtk-x11=false \
+            -Dgtk-wayland=false \
+            -Di18n=false \
+            -Demit-docs=false
+
+      # Bundle the GTK runtime next to Ghostty using the same relocatable
+      # layout as MSYS2 (bin/, lib/, share/) so GTK can find its data.
+      - name: Bundle GTK Runtime
+        run: |
+          dest="$(cygpath -u "$RUNNER_TEMP")/ghostty"
+          mkdir -p "$dest/lib" "$dest/share/glib-2.0/schemas" "$dest/share/icons"
+          cp -r "$MINGW_PREFIX/lib/gdk-pixbuf-2.0" "$dest/lib/"
+          cp "$MINGW_PREFIX/share/glib-2.0/schemas/gschemas.compiled" \
+            "$dest/share/glib-2.0/schemas/"
+          cp -r "$MINGW_PREFIX/share/icons/Adwaita" \
+            "$MINGW_PREFIX/share/icons/hicolor" "$dest/share/icons/"
+          # Mesa isn't in the MSYS2 prefix, so the ldd pass below skips it.
+          # When WGL can't give GTK a usable OpenGL (no GPU driver), GTK
+          # falls back to EGL with OpenGL ES, and libepoxy then aborts if
+          # libGLESv2.dll is missing. Mesa's opengl32.dll is left out on
+          # purpose: next to the exe it would replace the system's OpenGL
+          # driver for GTK too.
+          mesa="$(cygpath -u "$RUNNER_TEMP")/mesa"
+          cp "$mesa/libEGL.dll" "$mesa/libGLESv2.dll" "$dest/bin/"
+
+          # Copy every MSYS2 DLL that Ghostty or the pixbuf loaders link.
+          find "$dest" \( -name '*.exe' -o -name '*.dll' \) -print0 \
+            | xargs -0 ldd \
+            | awk -v prefix="$MINGW_PREFIX/bin/" 'index($3, prefix) == 1 { print $3 }' \
+            | sort -u \
+            | xargs cp -t "$dest/bin/"
+
+      - name: Zip App
+        run: |
+          cd "$(cygpath -u "$RUNNER_TEMP")"
+          zip -9 -r "$(cygpath -u "$GITHUB_WORKSPACE")/ghostty-windows-x86_64.zip" ghostty
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          path: ghostty-windows-x86_64.zip
+          archive: false
+
+      # Ghostty is a GUI-subsystem app with no console, so run it through
+      # Start-Process to capture its stderr logs. WER's crash dialog would
+      # keep a crashed process alive, so disable it. +version checks DLL
+      # loading and startup without GTK; the GUI must survive 15 seconds
+      # and render. The runners have no GPU, so Mesa's d3d12 driver uses
+      # the WARP software adapter. Don't set LIBGL_ALWAYS_SOFTWARE, as Mesa
+      # then skips d3d12, the only driver we ship.
+      - name: Test Ghostty
+        shell: pwsh
+        working-directory: ${{ runner.temp }}/ghostty
+        run: |
+          reg add 'HKCU\Software\Microsoft\Windows\Windows Error Reporting' /v DontShowUI /t REG_DWORD /d 1 /f
+
+          $p = Start-Process .\bin\ghostty.exe +version -Wait -PassThru -NoNewWindow `
+            -RedirectStandardOutput version.out -RedirectStandardError version.err
+          Get-Content version.out, version.err
+          if ($p.ExitCode -ne 0) { throw ('ghostty +version exited with 0x{0:X8}' -f $p.ExitCode) }
+
+          $p = Start-Process .\bin\ghostty.exe -PassThru -NoNewWindow `
+            -RedirectStandardOutput gui.out -RedirectStandardError gui.err
+          $null = $p.Handle # Without this ExitCode is null after exit.
+          $alive = -not $p.WaitForExit(15000)
+          if ($alive) { Stop-Process -Id $p.Id -Force }
+          Get-Content gui.out, gui.err
+          if (-not $alive) { throw ('ghostty exited early with 0x{0:X8}' -f $p.ExitCode) }
+          $log = Get-Content gui.err -Raw
+          if ($log -notmatch 'loaded OpenGL') { throw 'ghostty failed to load OpenGL' }
+          if ($log -match 'failed to initialize surface') { throw 'ghostty failed to initialize a surface' }
+
+      - name: Release
+        if: github.ref_name == 'main' && env.OPTIMIZE == 'ReleaseFast'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: 'Ghostty Tip ("Nightly")'
+        run: |
+          git tag -f tip "$GITHUB_SHA"
+          git push --force origin tip
+          gh release create tip --verify-tag --prerelease --title "$TITLE" ||
+            gh release edit tip --prerelease --title "$TITLE"
+          gh release upload tip ghostty-windows-x86_64.zip --clobber

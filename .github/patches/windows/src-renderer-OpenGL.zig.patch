@@ -1,0 +1,22 @@
+--- a/src/renderer/OpenGL.zig
++++ b/src/renderer/OpenGL.zig
+@@ -1,6 +1,7 @@
+ //! Graphics API wrapper for OpenGL.
+ pub const OpenGL = @This();
+ 
++const builtin = @import("builtin");
+ const std = @import("std");
+ const Allocator = std.mem.Allocator;
+ const gl = @import("opengl");
+@@ -280,8 +281,9 @@
+     presentation_health: rendererpkg.Health,
+ ) !ExportedFrame {
+     // We only export DMABUFs when the apprt can present them.
+-    // Otherwise, use CPU buffers.
+-    if (presentation_health == .healthy) {
++    // Otherwise, use CPU buffers. Windows has no DMABUFs, and Mesa's
++    // WGL-based EGL driver doesn't implement DMABUF export at all.
++    if (builtin.os.tag != .windows and presentation_health == .healthy) {
+         if (target.exportDmabuf(self.device.display, self.egl_context)) |dmabuf| {
+             return .{ .dmabuf = dmabuf };
+         } else |_| {

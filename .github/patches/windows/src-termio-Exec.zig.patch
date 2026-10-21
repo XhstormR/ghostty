@@ -1,0 +1,32 @@
+--- a/src/termio/Exec.zig
++++ b/src/termio/Exec.zig
+@@ -1053,9 +1053,13 @@
+                     break :f f.callback;
+                 },
+             },
+-            .rt_pre_exec = if (comptime @hasDecl(apprt.runtime, "pre_exec")) apprt.runtime.pre_exec.preExec else null,
++            // Windows never forks so these hooks are never called there.
++            // Skipping them avoids compiling the POSIX-only callbacks.
++            .rt_pre_exec = if (comptime builtin.target.os.tag != .windows and
++                @hasDecl(apprt.runtime, "pre_exec")) apprt.runtime.pre_exec.preExec else null,
+             .rt_pre_exec_info = self.rt_pre_exec_info,
+-            .rt_post_fork = if (comptime @hasDecl(apprt.runtime, "post_fork")) apprt.runtime.post_fork.postFork else null,
++            .rt_post_fork = if (comptime builtin.target.os.tag != .windows and
++                @hasDecl(apprt.runtime, "post_fork")) apprt.runtime.post_fork.postFork else null,
+             .rt_post_fork_info = self.rt_post_fork_info,
+             .data = self,
+         };
+@@ -2000,11 +2004,11 @@
+                             try alloc.dupe(u8, v)
+                     else
+                         try alloc.dupe(u8, v);
+-                    try args.append(alloc, try alloc.dupeSentinel(u8, argv0), 0);
++                    try args.append(alloc, try alloc.dupeSentinel(u8, argv0, 0));
+                 } else {
+                     var it = std.mem.tokenizeAny(u8, v, " \t");
+                     while (it.next()) |tok| {
+-                        try args.append(alloc, try alloc.dupeSentinel(u8, tok), 0);
++                        try args.append(alloc, try alloc.dupeSentinel(u8, tok, 0));
+                     }
+                 }
+                 break :shell try args.toOwnedSlice(alloc);
