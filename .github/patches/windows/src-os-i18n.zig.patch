@@ -1,0 +1,64 @@
+--- a/src/os/i18n.zig
++++ b/src/os/i18n.zig
+@@ -28,23 +28,37 @@
+ pub fn init(resources_dir: []const u8) InitError!void {
+     if (comptime !build_config.i18n) return;
+ 
+-    switch (builtin.target.os.tag) {
+-        // i18n is unsupported on Windows
+-        .windows => return,
++    // Our resources dir is always nested below the share dir that
++    // is standard for translations.
++    const share_dir = std.fs.path.dirname(resources_dir) orelse
++        return error.InvalidResourcesDir;
+ 
+-        else => {
+-            // Our resources dir is always nested below the share dir that
+-            // is standard for translations.
+-            const share_dir = std.fs.path.dirname(resources_dir) orelse
++    // Build our locale path
++    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
++    const path = std.mem.printSentinel(&buf, "{s}/locale", .{share_dir}, 0) catch
++        return error.OutOfMemory;
++
++    // Bind our bundle ID to the given locale path
++    log.debug("binding domain={s} path={s}", .{ build_config.bundle_id, path });
++    switch (builtin.target.os.tag) {
++        .windows => {
++            // bindtextdomain reads the path in the ANSI code page, so
++            // pass it as UTF-16 to support non-ASCII install directories.
++            const windows = std.os.windows;
++            var wbuf: [windows.PATH_MAX_WIDE + 1]u16 = undefined;
++            const wlen = windows.wtf8ToWtf16Le(wbuf[0..windows.PATH_MAX_WIDE], path) catch
+                 return error.InvalidResourcesDir;
++            wbuf[wlen] = 0;
++            _ = libintl_wbindtextdomain(build_config.bundle_id, wbuf[0..wlen :0].ptr) orelse
++                return error.OutOfMemory;
+ 
+-            // Build our locale path
+-            var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+-            const path = std.mem.printSentinel(&buf, "{s}/locale", .{share_dir}, 0) catch
++            // Translations are converted to the locale's code page (e.g.
++            // CP936) by default, but GTK only accepts UTF-8.
++            _ = bind_textdomain_codeset(build_config.bundle_id, "UTF-8") orelse
+                 return error.OutOfMemory;
++        },
+ 
+-            // Bind our bundle ID to the given locale path
+-            log.debug("binding domain={s} path={s}", .{ build_config.bundle_id, path });
++        else => {
+             _ = bindtextdomain(build_config.bundle_id, path.ptr) orelse
+                 return error.OutOfMemory;
+         },
+@@ -175,7 +189,11 @@
+ extern fn bindtextdomain(domainname: [*:0]const u8, dirname: [*:0]const u8) ?[*:0]const u8;
+ extern fn textdomain(domainname: [*:0]const u8) ?[*:0]const u8;
+ extern fn dgettext(domainname: [*:0]const u8, msgid: [*:0]const u8) [*:0]const u8;
++extern fn bind_textdomain_codeset(domainname: [*:0]const u8, codeset: [*:0]const u8) ?[*:0]const u8;
+ 
++// GNU libintl only exports wbindtextdomain under its prefixed name.
++extern fn libintl_wbindtextdomain(domainname: [*:0]const u8, wdirname: [*:0]const u16) ?[*:0]const u16;
++
+ // This is only available if we're building libintl from source
+ // since its otherwise not exported. We only need it on macOS
+ // currently but probably will on Windows as well.

@@ -46,7 +46,39 @@
      }
  
      /// Setup our action map.
-@@ -3272,7 +3274,7 @@
+@@ -3246,8 +3248,17 @@
+         /// `gtk-opengl-debug` dumps logs directly to stderr so both must be true
+         /// to enable OpenGL debugging.
+         opengl: bool = false,
++
++        /// Enable DirectComposition. On Windows, GTK's OpenGL and Vulkan
++        /// renderers present through it, but GTK only sets it up when asked to.
++        dcomp: bool = false,
+     } = .{
+         .opengl = global.logging().stderr and config.@"gtk-opengl-debug",
++        // Without DirectComposition GTK falls back to its Cairo renderer,
++        // which composites every frame we present on the CPU and pegs a
++        // core while custom shaders animate.
++        // Fixes for Windows: warning(glib): WARNING: Gsk: Failed to realize renderer 'GskGLRenderer' for surface 'GdkWin32Toplevel': OpenGL requires Direct Composition
++        .dcomp = builtin.os.tag == .windows,
+     };
+ 
+     const gdk_disable: struct {
+@@ -3256,7 +3267,12 @@
+         // Disabling Vulkan also saves hundreds of milliseconds of initialization
+         // time on certain systems.
+         vulkan: bool = true,
+-    } = .{};
++    } = .{
++        // On Windows, keep Vulkan available so users can pick the renderer
++        // with GSK_RENDERER: vulkan (our default, see below), gl or cairo.
++        // Fixes for Windows: warning(glib): WARNING: Gsk: Failed to realize renderer 'GskVulkanRenderer' for surface 'GdkWin32Toplevel': Vulkan support disabled via GDK_DISABLE
++        .vulkan = builtin.os.tag != .windows,
++    };
+ 
+     {
+         var buf: [1024]u8 = undefined;
+@@ -3272,7 +3288,7 @@
          try writer.writeByte(0);
          const value = writer.buffered();
          log.warn("setting GDK_DEBUG={s}", .{value[0 .. value.len - 1]});
@@ -55,12 +87,22 @@
      }
  
      {
-@@ -3289,7 +3291,7 @@
+@@ -3289,7 +3305,17 @@
          try writer.writeByte(0);
          const value = writer.buffered();
          log.warn("setting GDK_DISABLE={s}", .{value[0 .. value.len - 1]});
 -        _ = setenv("GDK_DISABLE", @ptrCast(value[0 .. value.len - 1 :0]), 1);
 +        _ = glib.setenv("GDK_DISABLE", value[0 .. value.len - 1 :0], 1);
++    }
++
++    // On Windows, GSK prefers its OpenGL renderer. Default to its Vulkan
++    // renderer instead, unless the user picked one. If Vulkan fails to
++    // realize, GSK still falls back to OpenGL and then Cairo.
++    if (comptime builtin.os.tag == .windows) {
++        if (glib.getenv("GSK_RENDERER") == null) {
++            log.warn("setting GSK_RENDERER=vulkan", .{});
++            _ = glib.setenv("GSK_RENDERER", "vulkan", 0);
++        }
      }
  
      // Sync environ after altering system env

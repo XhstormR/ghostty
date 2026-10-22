@@ -15,7 +15,7 @@
 +        // Win32 IME only removes its message filter on focus-out, so the
 +        // filter would outlive the IME and run on freed memory. The next
 +        // focus-enter focuses it back in.
-+        // Fixes: error(glib): CRITICAL: Gtk: gtk_im_context_ime_message_filter: assertion 'GTK_IS_IM_CONTEXT_IME (data)' failed
++        // Fixes for Windows: error(glib): CRITICAL: Gtk: gtk_im_context_ime_message_filter: assertion 'GTK_IS_IM_CONTEXT_IME (data)' failed
 +        priv.im_context.as(gtk.IMContext).focusOut();
          priv.im_context.as(gtk.IMContext).setClientWidget(null);
      }
@@ -29,7 +29,7 @@
 +                // GTK's Win32 clipboard hands empty text to g_utf8_to_utf16
 +                // as NULL and then dereferences the result. Clear the
 +                // clipboard instead, which is what copying nothing means.
-+                // Fixes: error(glib): CRITICAL: GLib: g_utf8_to_utf16: assertion 'str != NULL' failed
++                // Fixes for Windows: error(glib): CRITICAL: GLib: g_utf8_to_utf16: assertion 'str != NULL' failed
 +                _ = clipboard.setContent(null);
 +            } else if (alloc.alloc(*gdk.ContentProvider, contents.len)) |providers| {
                  // Note: we don't need to unref the individual providers

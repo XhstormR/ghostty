@@ -1,6 +1,62 @@
 --- a/src/termio/Exec.zig
 +++ b/src/termio/Exec.zig
-@@ -1053,9 +1053,13 @@
+@@ -123,8 +123,8 @@
+     // Create our pipe that we'll use to kill our read thread.
+     // pipe[0] is the read end, pipe[1] is the write end.
+     const pipe = try internal_os.pipe();
+-    errdefer _ = posix.system.close(pipe[0]);
+-    errdefer _ = posix.system.close(pipe[1]);
++    errdefer closePipe(pipe[0]);
++    errdefer closePipe(pipe[1]);
+ 
+     // Setup our stream so that we can write.
+     var stream = xev.Stream.initFd(pty_fds.write);
+@@ -203,7 +203,16 @@
+     // Quit our read thread after exiting the subprocess so that
+     // we don't get stuck waiting for data to stop flowing if it is
+     // a particularly noisy process.
+-    switch (posix.errno(posix.system.write(exec.read_thread_pipe, "x", 1))) {
++    if (comptime builtin.target.os.tag == .windows) {
++        // The pipe ends are HANDLEs, which libc write would treat as a
++        // CRT fd and reject with EBADF, so the quit byte was never sent.
++        // Fixes for Windows: error writing to read thread quit pipe err=EBADF
++        var iosb: windows.IO_STATUS_BLOCK = undefined;
++        switch (std.os.windows.ntdll.NtWriteFile(exec.read_thread_pipe, null, null, null, &iosb, "x", 1, null, null)) {
++            .SUCCESS => {},
++            else => |status| log.warn("error writing to read thread quit pipe status={}", .{status}),
++        }
++    } else switch (posix.errno(posix.system.write(exec.read_thread_pipe, "x", 1))) {
+         .SUCCESS => {},
+ 
+         // EPIPE means that our read thread is closed already, which is
+@@ -229,6 +238,17 @@
+     exec.read_thread.join();
+ }
+ 
++/// Close an end of the pipe from `internal_os.pipe()`. On Windows these
++/// are HANDLEs, which libc close would treat as a CRT fd and reject.
++fn closePipe(fd: posix.fd_t) void {
++    if (comptime builtin.target.os.tag == .windows) {
++        // Fixes for Windows: read thread quit pipe HANDLEs were leaked
++        _ = windows.exp.kernel32.CloseHandle(fd);
++    } else {
++        _ = posix.system.close(fd);
++    }
++}
++
+ pub fn focusGained(
+     self: *Exec,
+     td: *termio.Termio.ThreadData,
+@@ -547,7 +567,7 @@
+     termios_mode: ptypkg.Mode = .{},
+ 
+     pub fn deinit(self: *ThreadData, alloc: Allocator) void {
+-        _ = posix.system.close(self.read_thread_pipe);
++        closePipe(self.read_thread_pipe);
+ 
+         // Clear our write pool. We know we aren't ever going to do
+         // any more IO since we stop our data stream below so we can just
+@@ -1053,9 +1073,13 @@
                      break :f f.callback;
                  },
              },
@@ -16,7 +72,17 @@
              .rt_post_fork_info = self.rt_post_fork_info,
              .data = self,
          };
-@@ -2000,11 +2004,11 @@
+@@ -1777,7 +1801,8 @@
+ 
+     fn threadMainWindows(fd: posix.fd_t, io: *termio.Termio, quit: posix.fd_t) void {
+         // Always close our end of the pipe when we exit.
+-        defer _ = posix.system.close(quit);
++        // Fixes for Windows: read thread quit pipe HANDLEs were leaked
++        defer _ = windows.exp.kernel32.CloseHandle(quit);
+ 
+         // Setup our crash metadata
+         crash.sentry.thread_state = .{
+@@ -2000,11 +2025,11 @@
                              try alloc.dupe(u8, v)
                      else
                          try alloc.dupe(u8, v);

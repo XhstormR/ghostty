@@ -23,7 +23,6 @@ on:
       - "!PACKAGING.md"
       - "!AI_POLICY.md"
       - "!AGENTS.md"
-      - "!CLAUDE.md"
       - "!Doxyfile"
       - "!DoxygenLayout.xml"
       - "!LICENSE"
@@ -39,8 +38,8 @@ on:
       - "!.swiftlint.yml"
       - "!typos.toml"
       - "!valgrind.supp"
-      - ".github/workflows/release-tip-windows.yml"
       - ".github/patches/windows/**"
+      - ".github/workflows/release-tip-windows.yml"
 
 # We must only run one release workflow at a time to prevent corrupting
 # our release artifacts.
@@ -88,36 +87,17 @@ jobs:
           install: zip
           pacboy: >-
             adwaita-icon-theme:p
+            blueprint-compiler:p
+            gettext-tools:p
             gtk4:p
             libadwaita:p
-            libxml2:p
-            meson:p
-            ninja:p
             pkgconf:p
-            python:p
-            python-gobject:p
 
-      # Windows support for the GTK apprt isn't upstream yet. Keep the
-      # source changes as patches so this fork can track upstream cleanly.
-      - name: Apply Windows Patches
-        run: git apply -v .github/patches/windows/*.patch
-
-      # Ghostty requires blueprint-compiler 0.20 or newer but MSYS2 only
-      # ships 0.18, so install a release from source. Zig can only spawn
-      # .exe/.cmd/.bat programs on Windows, so also add a .cmd shim for the
-      # installed Python script. Python on Windows reads files using the
-      # ANSI code page by default, so force UTF-8 mode for both.
+      # Zig can only spawn .exe/.cmd/.bat programs on Windows, so add a .cmd
+      # shim for MSYS2's blueprint-compiler Python script. Python on Windows
+      # reads files using the ANSI code page by default, so force UTF-8.
       - name: Setup blueprint-compiler
-        env:
-          BLUEPRINT_COMPILER_VERSION: 0.22.2
-          PYTHONUTF8: 1
         run: |
-          src="$(cygpath -u "$RUNNER_TEMP")/blueprint-compiler"
-          git clone --depth 1 --branch "v${BLUEPRINT_COMPILER_VERSION}" \
-            https://github.com/GNOME/blueprint-compiler.git "$src"
-          meson setup --prefix="$(cygpath -m "$MINGW_PREFIX")" \
-            "$(cygpath -m "$src/build")" "$(cygpath -m "$src")"
-          meson install -C "$(cygpath -m "$src/build")"
           printf '@"%%~dp0python.exe" -X utf8 "%%~dp0blueprint-compiler" %%*\r\n' \
             > "$MINGW_PREFIX/bin/blueprint-compiler.cmd"
           cmd //c "blueprint-compiler --version"
@@ -176,6 +156,11 @@ jobs:
             [ -e "$name.lib" ] || cp "$implib" "$name.lib"
           done
 
+      # Windows support for the GTK apprt isn't upstream yet. Keep the
+      # source changes as patches so this fork can track upstream cleanly.
+      - name: Apply Windows Patches
+        run: git apply -v .github/patches/windows/*.patch
+
       # Zig doesn't search the MSYS2 prefix on its own, so make sure
       # pkg-config reports its include and library directories too.
       - name: Build Ghostty
@@ -189,9 +174,7 @@ jobs:
             -Dcpu=baseline \
             -Doptimize="$OPTIMIZE" \
             -Dapp-runtime=gtk \
-            -Dgtk-x11=false \
-            -Dgtk-wayland=false \
-            -Di18n=false \
+            -Di18n=true \
             -Demit-docs=false
 
       # Bundle the GTK runtime next to Ghostty using the same relocatable
@@ -213,6 +196,20 @@ jobs:
           # driver for GTK too.
           mesa="$(cygpath -u "$RUNNER_TEMP")/mesa"
           cp "$mesa/libEGL.dll" "$mesa/libGLESv2.dll" "$dest/bin/"
+
+          # GTK and libadwaita look up their translations next to their DLLs.
+          # Bundle Ghostty's languages, falling back to e.g. ko for ko_KR.
+          for dir in "$dest"/share/locale/*/; do
+            locale="$(basename "$dir")"
+            for mo in gtk40.mo libadwaita.mo; do
+              for name in "$locale" "${locale%%_*}"; do
+                src="$MINGW_PREFIX/share/locale/$name/LC_MESSAGES/$mo"
+                [ -e "$src" ] || continue
+                install -Dm644 "$src" "$dest/share/locale/$name/LC_MESSAGES/$mo"
+                break
+              done
+            done
+          done
 
           # Copy every MSYS2 DLL that Ghostty or the pixbuf loaders link.
           find "$dest" \( -name '*.exe' -o -name '*.dll' \) -print0 \

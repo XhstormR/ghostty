@@ -8,7 +8,24 @@
  const std = @import("std");
  const Allocator = std.mem.Allocator;
  const gl = @import("opengl");
-@@ -280,8 +281,9 @@
+@@ -173,6 +174,16 @@
+     errdefer gl.glad.unload();
+     log.info("loaded OpenGL {}.{}", .{ major, minor });
+ 
++    // Mesa's d3d12 driver falls back to WARP, a CPU rasterizer that
++    // reports itself as "Microsoft Basic Render Driver", when it can't
++    // use a GPU. Log the device so CPU-bound rendering is easy to spot.
++    if (comptime builtin.os.tag == .windows) {
++        log.info("OpenGL renderer={s} vendor={s}", .{
++            std.mem.span(gl.glad.context.GetString.?(gl.c.GL_RENDERER)),
++            std.mem.span(gl.glad.context.GetString.?(gl.c.GL_VENDOR)),
++        });
++    }
++
+     // Need to check version before trying to enable it
+     if (major < MIN_VERSION_MAJOR or
+         (major == MIN_VERSION_MAJOR and minor < MIN_VERSION_MINOR))
+@@ -280,8 +291,10 @@
      presentation_health: rendererpkg.Health,
  ) !ExportedFrame {
      // We only export DMABUFs when the apprt can present them.
@@ -16,6 +33,7 @@
 -    if (presentation_health == .healthy) {
 +    // Otherwise, use CPU buffers. Windows has no DMABUFs, and Mesa's
 +    // WGL-based EGL driver doesn't implement DMABUF export at all.
++    // Fixes for Windows: ghostty exited early with 0xC0000005
 +    if (builtin.os.tag != .windows and presentation_health == .healthy) {
          if (target.exportDmabuf(self.device.display, self.egl_context)) |dmabuf| {
              return .{ .dmabuf = dmabuf };
