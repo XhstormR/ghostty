@@ -763,6 +763,27 @@ pub const Image = struct {
     /// current frame), since consumers key texture caches off it.
     generation: u64 = 0,
 
+    /// Identifies the transmission that created this image. It is set to
+    /// the same stamp as `generation` when the image is added to (or
+    /// replaced in) an ImageStorage, and then never changes. Zero means
+    /// "never stored".
+    ///
+    /// Use `generation` to detect that the displayed pixels changed. Use
+    /// `transmission` to detect that the image itself was replaced. The
+    /// two differ for animations: showing another frame updates
+    /// `generation` but leaves `transmission` alone.
+    ///
+    /// ```zig
+    /// const before = storage.imageById(1).?;
+    ///
+    /// // ... the client shows another animation frame ...
+    ///
+    /// const after = storage.imageById(1).?;
+    /// after.generation != before.generation; // true: new pixels shown
+    /// after.transmission == before.transmission; // true: same image
+    /// ```
+    transmission: u64 = 0,
+
     /// Animation state, non-null once any animation command (a=f,
     /// a=a) has attached animation state to this image. Owned by the
     /// image; replaced/retransmitted images drop it, which implements
@@ -833,12 +854,24 @@ pub const Image = struct {
     }
 
     /// The pixel data that should be displayed for this image. For an
-    /// animated image this is the current animation frame; otherwise
-    /// (and for the root frame) it is the image's own data.
+    /// animated image this is the current animation frame. Otherwise,
+    /// and for the root frame, it is the image's own data.
+    ///
+    /// The result is pending when the displayed pixels have not arrived
+    /// yet. That can be true even when `data` is complete, because the
+    /// current animation frame may still be pending. Code that draws an
+    /// image should check this result rather than `data`:
+    ///
+    /// ```zig
+    /// const pixels = image.renderData().bytes() orelse return; // not ready
+    /// upload(pixels);
+    /// ```
     pub fn renderData(self: *const Image) Data {
         if (self.animation) |anim| {
             if (anim.current_index > 0) {
-                return .{ .complete = anim.frames.items[anim.current_index - 1].data };
+                const frame = anim.frames.items[anim.current_index - 1];
+                if (frame.isPending()) return .{ .pending = frame.pending_len };
+                return .{ .complete = frame.data };
             }
         }
 
@@ -846,9 +879,9 @@ pub const Image = struct {
     }
 
     /// The pixel data of the given 1-based animation frame number, or
-    /// null if the frame doesn't exist. Frame 1 (the root frame)
-    /// always exists as long as the image data is complete, even for
-    /// images without animation state.
+    /// null if the frame doesn't exist or its pixels have not arrived
+    /// yet. Frame 1 (the root frame) always exists as long as the image
+    /// data is complete, even for images without animation state.
     ///
     /// The returned slice is owned by the image (or its animation)
     /// and remains valid until the image or frame is mutated.
@@ -862,7 +895,9 @@ pub const Image = struct {
                 // image base data, so the animation frames start at frame 2.
                 const idx = number - 2;
                 if (idx >= anim.frames.items.len) return null;
-                return anim.frames.items[idx].data;
+                const frame = anim.frames.items[idx];
+                if (frame.isPending()) return null;
+                return frame.data;
             },
         }
     }

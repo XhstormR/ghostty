@@ -425,10 +425,13 @@ fn formatSnapshot(
 
         // Known tags make the annotated diff readable. Preserve unknown tags
         // numerically so formatter output is still useful for encoder bugs.
-        if (std.enums.fromInt(record.Tag, tag_raw)) |tag| {
+        if (std.enums.tagName(
+            record.Tag,
+            @fromBackingInt(@intCast(tag_raw)),
+        )) |name| {
             try writer.print(
                 "\n# offset 0x{x:0>8}: {s} record, payload {} bytes\n",
-                .{ offset, @tagName(tag), payload_len },
+                .{ offset, name, payload_len },
             );
         } else {
             try writer.print(

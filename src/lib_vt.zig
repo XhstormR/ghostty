@@ -97,6 +97,7 @@ pub const Terminal = terminal.Terminal;
 pub const TerminalStream = terminal.TerminalStream;
 pub const Stream = terminal.Stream;
 pub const StreamAction = terminal.StreamAction;
+pub const StreamBoundary = terminal.StreamBoundary;
 pub const SemanticPrompt = terminal.SemanticPrompt;
 pub const UnknownSequence = terminal.UnknownSequence;
 
@@ -329,7 +330,7 @@ comptime {
         @export(&c.terminal_resize, .{ .name = "ghostty_terminal_resize" });
         @export(&c.terminal_set, .{ .name = "ghostty_terminal_set" });
         @export(&c.terminal_vt_write, .{ .name = "ghostty_terminal_vt_write" });
-        @export(&c.terminal_vt_write_until_ground, .{ .name = "ghostty_terminal_vt_write_until_ground" });
+        @export(&c.terminal_vt_write_until, .{ .name = "ghostty_terminal_vt_write_until" });
         @export(&c.terminal_scroll_viewport, .{ .name = "ghostty_terminal_scroll_viewport" });
         @export(&c.terminal_compression_activity, .{ .name = "ghostty_terminal_compression_activity" });
         @export(&c.terminal_compress, .{ .name = "ghostty_terminal_compress" });

@@ -166,26 +166,62 @@ pub const ImageStorage = struct {
     total_bytes: usize = 0,
     total_limit: usize = 320 * 1000 * 1000, // 320MB
 
-    /// Identifies one exact pending image transmission. The generation is
-    /// assigned by this storage when the pending image is inserted, so a
-    /// later replacement of the same ID cannot consume stale payload bytes.
+    /// A ticket for attaching pixels to an image that was added before its
+    /// pixels arrived. `addPendingImage` returns one.
+    ///
+    /// A pending image takes part in storage like any other image. It can
+    /// be placed, queried and evicted, and its full size is reserved
+    /// against the storage limit. It just has nothing to draw yet. When
+    /// the pixels arrive, `complete` attaches them, and `completeFrame`
+    /// does the same for the image's pending animation frames.
+    ///
+    /// The ticket only works for the exact image it was issued for. If
+    /// the image was deleted, evicted, or replaced by a new transmission
+    /// with the same ID in the meantime, completing it does nothing and
+    /// returns false. That way, pixels that arrive late can never end up
+    /// on the wrong image.
+    ///
+    /// ```zig
+    /// const ticket = try storage.addPendingImage(io, alloc, screen, .{
+    ///     .id = 1,
+    ///     .width = 2,
+    ///     .height = 2,
+    ///     .format = .rgba,
+    ///     .data = .{ .pending = 16 },
+    /// });
+    ///
+    /// // ... later, once the 16 bytes of pixels have arrived ...
+    ///
+    /// if (!ticket.complete(&storage, io, pixels)) {
+    ///     // The image is gone or was replaced, so the pixels are still ours.
+    ///     alloc.free(pixels);
+    /// }
+    /// ```
     pub const PendingImage = struct {
+        /// The ID of the pending image.
         id: u32,
-        generation: u64,
 
-        /// Attach owned decoded bytes if this exact pending transmission is
-        /// still resident. On true, storage owns `data`; on false, the caller
-        /// retains ownership. Completion preserves the image generation (and
-        /// therefore eviction age) while marking storage content as mutated.
+        /// The `Image.transmission` of the pending image, which tells it
+        /// apart from any later image with the same ID.
+        transmission: u64,
+
+        /// Attach the image's decoded pixels.
+        ///
+        /// Returns true if the image is still the one this ticket was
+        /// issued for, its pixels are still pending, and `data` has
+        /// exactly the expected length. The storage then owns `data`.
+        /// Otherwise this returns false, changes nothing, and the caller
+        /// still owns `data`.
+        ///
+        /// Completing an image keeps its `generation`, so the image keeps
+        /// its age for eviction purposes.
         pub fn complete(
             self: PendingImage,
             storage: *ImageStorage,
             io: std.Io,
             data: []const u8,
         ) bool {
-            const img = storage.images.getPtr(self.id) orelse return false;
-            if (img.generation != self.generation) return false;
-
+            const img = self.image(storage) orelse return false;
             const expected_len = switch (img.data) {
                 .complete => return false,
                 .pending => |len| len,
@@ -195,6 +231,54 @@ pub const ImageStorage = struct {
             img.data = .{ .complete = data };
             storage.markMutated(io);
             return true;
+        }
+
+        /// Attach the RGBA pixels of one pending animation frame.
+        ///
+        /// `number` is the frame number as the Kitty graphics protocol
+        /// counts frames, the same numbering `Image.frameData` uses.
+        /// Frame 1 is the image itself, so animation frames start at 2.
+        /// Use `complete` for frame 1.
+        ///
+        /// This follows the same rules as `complete`: it returns true and
+        /// takes ownership of `data` only if the image is still the one
+        /// this ticket was issued for, the frame is still pending, and
+        /// `data` has exactly the frame's length. The storage keeps
+        /// `data` mutable because later frame edits draw into it.
+        ///
+        /// If the completed frame is the one on screen, the image gets a
+        /// new `generation` so that renderers pick up the new pixels.
+        pub fn completeFrame(
+            self: PendingImage,
+            storage: *ImageStorage,
+            io: std.Io,
+            number: u32,
+            data: []u8,
+        ) bool {
+            if (number < 2) return false;
+            const img = self.image(storage) orelse return false;
+            const anim = img.animation orelse return false;
+            const index = number - 2;
+            if (index >= anim.frames.items.len) return false;
+            const frame = &anim.frames.items[index];
+            if (!frame.isPending()) return false;
+            if (data.len != frame.pending_len) return false;
+
+            frame.* = .{ .data = data, .gap_ms = frame.gap_ms };
+            if (anim.current_index == number - 1) {
+                storage.markImageContentChanged(io, img);
+            } else {
+                storage.markMutated(io);
+            }
+            return true;
+        }
+
+        /// The image this ticket was issued for, or null if it is no
+        /// longer in storage.
+        fn image(self: PendingImage, storage: *ImageStorage) ?*Image {
+            const img = storage.images.getPtr(self.id) orelse return null;
+            if (img.transmission != self.transmission) return null;
+            return img;
         }
     };
 
@@ -378,12 +462,16 @@ pub const ImageStorage = struct {
         // every add/replace a unique stamp even when the same image ID
         // is retransmitted with identical dimensions, so consumers
         // (e.g. renderer texture caches) can detect content changes.
+        // The transmission starts out with the same stamp and keeps it
+        // for the life of this image.
         self.markMutated(io);
         gop.value_ptr.generation = self.generation;
+        gop.value_ptr.transmission = self.generation;
     }
 
-    /// Add an image whose decoded payload bytes have not arrived yet.
-    /// Returns the token required to complete this exact transmission.
+    /// Add an image whose pixels have not arrived yet. `img.data` must be
+    /// `.pending` with the length of the decoded pixels. Returns the
+    /// ticket to attach those pixels later. See `PendingImage`.
     pub fn addPendingImage(
         self: *ImageStorage,
         io: std.Io,
@@ -394,7 +482,7 @@ pub const ImageStorage = struct {
         assert(img.data == .pending);
         try self.addImage(io, alloc, s, img);
         const stored = self.images.get(img.id).?;
-        return .{ .id = stored.id, .generation = stored.generation };
+        return .{ .id = stored.id, .transmission = stored.transmission };
     }
 
     /// Add a placement for a given image. The caller must verify in advance
@@ -1138,6 +1226,10 @@ pub const ImageStorage = struct {
             // restored from a snapshot); nothing can be displayed.
             if (img.data.isPending()) continue;
 
+            // For the same reason, playback waits until every frame's
+            // pixels have arrived.
+            if (anim.hasPendingFrames()) continue;
+
             // A zero total duration means every frame is gapless and
             // no frame can ever be displayed, so the animation can
             // never advance. This also guards the gapless-skip loop
@@ -1594,16 +1686,20 @@ pub const ImageStorage = struct {
 
         if (number == 1) {
             // Deleting the root frame promotes frame 2 to root. The
-            // promoted frame's bytes stay reserved; only the old root
-            // data is freed.
+            // promoted frame's bytes stay reserved and only the old root
+            // data is freed. If the promoted frame is still pending, the
+            // image's own pixels become pending.
             self.releaseAnimationBytes(img.data.len());
             img.data.deinit(alloc);
             const promoted = anim.frames.orderedRemove(0);
-            img.data = .{ .complete = promoted.data };
+            img.data = if (promoted.isPending())
+                .{ .pending = promoted.pending_len }
+            else
+                .{ .complete = promoted.data };
             anim.root_gap_ms = promoted.gap_ms;
         } else {
             const removed = anim.frames.orderedRemove(number - 2);
-            self.releaseAnimationBytes(removed.data.len);
+            self.releaseAnimationBytes(removed.storageSize());
             alloc.free(removed.data);
         }
 
@@ -3673,13 +3769,14 @@ test "storage: pending image completes once and preserves age" {
     defer alloc.free(wrong);
 
     const storage_generation = s.generation;
+    const image_generation = s.imageById(1).?.generation;
     const dirty = s.dirty;
     const pixels = try alloc.alloc(u8, 16);
     @memset(pixels, '*');
     try testing.expect(pending.complete(&s, io, pixels));
     try testing.expect(s.dirty != dirty);
     try testing.expect(s.generation > storage_generation);
-    try testing.expectEqual(pending.generation, s.imageById(1).?.generation);
+    try testing.expectEqual(image_generation, s.imageById(1).?.generation);
     try testing.expectEqual(@as(usize, 16), s.total_bytes);
     try testing.expectEqualSlices(u8, pixels, s.imageById(1).?.data.bytes().?);
 
@@ -3801,6 +3898,102 @@ test "storage: replacement reuses pending reservation and removes placements" {
     s.delete(io, alloc, &t, .{ .id = .{ .delete = true, .image_id = 1 } });
     try testing.expectEqual(@as(usize, 0), s.images.count());
     try testing.expectEqual(@as(usize, 0), s.placements.count());
+}
+
+test "storage: pending completion survives a change of displayed frame" {
+    const testing = std.testing;
+    const io = testing.io;
+    const alloc = testing.allocator;
+    var t = try terminal.Terminal.init(io, alloc, .{ .rows = 3, .cols = 3 });
+    defer t.deinit(alloc);
+
+    var s: ImageStorage = .{};
+    defer s.deinit(alloc, t.screens.active);
+
+    const pending = try s.addPendingImage(io, alloc, t.screens.active, .{
+        .id = 1,
+        .width = 1,
+        .height = 1,
+        .format = .rgba,
+        .data = .{ .pending = 4 },
+    });
+
+    // Showing another frame stamps a new image generation, but the image
+    // is still the same transmission.
+    const img = s.images.getPtr(1).?;
+    s.markImageContentChanged(io, img);
+    try testing.expect(img.generation != pending.transmission);
+    try testing.expectEqual(pending.transmission, img.transmission);
+
+    const pixels = try alloc.dupe(u8, "rgba");
+    try testing.expect(pending.complete(&s, io, pixels));
+}
+
+test "storage: pending animation frames" {
+    const testing = std.testing;
+    const io = testing.io;
+    const alloc = testing.allocator;
+    var t = try terminal.Terminal.init(io, alloc, .{ .rows = 3, .cols = 3 });
+    defer t.deinit(alloc);
+
+    var s: ImageStorage = .{};
+    defer s.deinit(alloc, t.screens.active);
+
+    const pending = try s.addPendingImage(io, alloc, t.screens.active, .{
+        .id = 1,
+        .width = 1,
+        .height = 1,
+        .format = .rgba,
+        .data = .{ .pending = 4 },
+    });
+    const anim = try alloc.create(animation.Animation);
+    anim.* = .{ .state = .running, .current_index = 2 };
+    for (0..2) |_| try anim.frames.append(alloc, .{
+        .data = &.{},
+        .gap_ms = 10,
+        .pending_len = 4,
+    });
+    try s.reserveAnimationBytes(io, alloc, t.screens.active, 1, anim.frameBytes());
+    s.images.getPtr(1).?.animation = anim;
+    try s.addPlacement(io, alloc, t.screens.active, 1, 1, .{
+        .location = .{ .pin = try trackPin(&t, .{ .x = 0, .y = 0 }) },
+    });
+    try testing.expectEqual(@as(usize, 12), s.total_bytes);
+    try testing.expectEqual(@as(usize, 12), s.imageById(1).?.storageSize());
+
+    // Nothing is displayable or playable until every frame arrives.
+    try testing.expect(pending.complete(&s, io, try alloc.dupe(u8, "base")));
+    var img = s.imageById(1).?;
+    try testing.expect(img.renderData().isPending());
+    try testing.expect(img.frameData(3) == null);
+    try testing.expect(s.animationTick(io, 0) == null);
+
+    // A frame with the wrong length, a missing frame, and frame 1 (the
+    // image itself, completed with `complete`) are all refused.
+    const wrong = try alloc.dupe(u8, "short");
+    defer alloc.free(wrong);
+    try testing.expect(!pending.completeFrame(&s, io, 2, wrong));
+    const missing = try alloc.dupe(u8, "none");
+    defer alloc.free(missing);
+    try testing.expect(!pending.completeFrame(&s, io, 4, missing));
+    try testing.expect(!pending.completeFrame(&s, io, 1, missing));
+
+    // Completing the current frame (frame 3) changes the displayed
+    // content.
+    const generation = img.generation;
+    try testing.expect(pending.completeFrame(&s, io, 3, try alloc.dupe(u8, "two!")));
+    img = s.imageById(1).?;
+    try testing.expect(img.generation != generation);
+    try testing.expectEqualStrings("two!", img.renderData().bytes().?);
+    try testing.expect(s.animationTick(io, 0) == null);
+
+    // Deleting the pending frame releases its reservation.
+    s.delete(io, alloc, &t, .{ .animation_frames = .{
+        .image_id = 1,
+        .frame = 2,
+    } });
+    try testing.expectEqual(@as(usize, 8), s.total_bytes);
+    try testing.expect(s.animationTick(io, 0) != null);
 }
 
 test "storage: pending images share exact eviction ordering" {

@@ -935,10 +935,9 @@ pub fn encode(
 
 /// Errors possible while decoding one native TERMINAL record.
 pub const DecodeError = PayloadDecodeError ||
-    record.Reader.InitError ||
     record.Reader.FinishError ||
     error{
-        /// The next record is valid but is not a TERMINAL.
+        /// The record is valid but is not a TERMINAL.
         UnexpectedRecordTag,
     };
 
@@ -948,15 +947,19 @@ pub const DecodeError = PayloadDecodeError ||
 /// primary and optional alternate screens with the declared routing. Later
 /// SCREEN records replace those screens in place. On failure, all decoded and
 /// partially initialized native state is released.
+///
+/// `record_header` is the record's header, already read from `source`. See
+/// "Decoding Records" in `record.zig`.
 pub fn decode(
     source: *std.Io.Reader,
+    record_header: record.Header,
     io_: std.Io,
     alloc: Allocator,
 ) DecodeError!Terminal {
     // Finish the complete record before constructing native terminal state.
     var payload: DecodedPayload = payload: {
         var record_reader: record.Reader = undefined;
-        try record_reader.init(source);
+        record_reader.initHeader(source, record_header);
         if (record_reader.header.tag != .terminal) {
             return error.UnexpectedRecordTag;
         }
@@ -1657,6 +1660,7 @@ test "TERMINAL record encodes native terminal state" {
     var source: std.Io.Reader = .fixed(destination.written());
     var restored = try decode(
         &source,
+        try record.nextHeader(&source),
         testing.io,
         testing.allocator,
     );
@@ -1738,6 +1742,7 @@ test "TERMINAL record declares an initialized alternate screen" {
     var source: std.Io.Reader = .fixed(destination.written());
     var restored = try decode(
         &source,
+        try record.nextHeader(&source),
         testing.io,
         testing.allocator,
     );
@@ -1803,7 +1808,12 @@ test "TERMINAL record decoding rejects malformed input transactionally" {
     var wrong_tag_source: std.Io.Reader = .fixed(wrong_tag.written());
     try testing.expectError(
         error.UnexpectedRecordTag,
-        decode(&wrong_tag_source, testing.io, testing.allocator),
+        decode(
+            &wrong_tag_source,
+            try record.nextHeader(&wrong_tag_source),
+            testing.io,
+            testing.allocator,
+        ),
     );
 
     // Build one canonical record for exhaustive truncation and allocation
@@ -1829,8 +1839,10 @@ test "TERMINAL record decoding rejects malformed input transactionally" {
         var source: std.Io.Reader = .fixed(
             encoded.written()[0..fixture_len],
         );
+        const header = record.nextHeader(&source) catch continue;
         var restored = decode(
             &source,
+            header,
             testing.io,
             testing.allocator,
         ) catch continue;
@@ -1845,6 +1857,11 @@ test "TERMINAL record decoding rejects malformed input transactionally" {
     var failing_source: std.Io.Reader = .fixed(encoded.written());
     try testing.expectError(
         error.OutOfMemory,
-        decode(&failing_source, testing.io, failing.allocator()),
+        decode(
+            &failing_source,
+            try record.nextHeader(&failing_source),
+            testing.io,
+            failing.allocator(),
+        ),
     );
 }

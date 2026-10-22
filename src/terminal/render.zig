@@ -2465,8 +2465,10 @@ const Kitty = struct {
         p: *const kitty_gfx.ImageStorage.Placement,
         kind: Placement.Kind,
     ) ?RenderState.ImagePlacement {
+        // Nothing to draw until the displayed pixels arrive. For an
+        // animation, those are the current frame's pixels.
         const image = storage.imageById(key.image_id) orelse return null;
-        if (image.data.isPending()) return null;
+        if (image.renderData().isPending()) return null;
 
         // The size is zero when the terminal has no cell size in pixels.
         // Then there is nothing to draw.
@@ -2525,8 +2527,10 @@ const Kitty = struct {
         ) orelse return;
         run.target = target.key;
 
+        // Nothing to draw until the displayed pixels arrive, as in
+        // `template`.
         const image = storage.imageById(run.image_id) orelse return;
-        if (image.data.isPending()) return;
+        if (image.renderData().isPending()) return;
 
         // Without a cell size in pixels, there is no size to draw at.
         if (cell_width == 0 or cell_height == 0) return;
