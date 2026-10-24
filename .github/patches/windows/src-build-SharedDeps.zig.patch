@@ -1,6 +1,6 @@
 --- a/src/build/SharedDeps.zig
 +++ b/src/build/SharedDeps.zig
-@@ -216,14 +216,25 @@
+@@ -216,18 +216,43 @@
      // POSIX C imports that are used throughout Ghostty on a general basis.
      // (note: errno is C stdlib but we just include it here because that's
      // where it's generally included otherwise)
@@ -29,7 +29,25 @@
          .target = target,
          .optimize = optimize,
      });
-@@ -723,7 +734,6 @@
+ 
++    // D3D12 and GL interop declarations for sharing frames with GTK on
++    // Windows, see src/renderer/opengl/d3d12.zig.
++    if (target.result.os.tag == .windows) {
++        try translate_c.addImportToModule(b, "d3d12_c", step.root_module, .{
++            .source = .{ .includes = .{ .files = &.{
++                .{ .path = "d3d12.h" },
++                .{ .path = "GL/gl.h" },
++                .{ .path = "GL/glext.h" },
++            } } },
++            .target = target,
++            .optimize = optimize,
++        });
++    }
++
+     // Freetype. We always include this even if our font backend doesn't
+     // use it because Dear Imgui uses Freetype.
+     _ = b.systemIntegrationOption("freetype", .{}); // Shows it in help
+@@ -723,7 +748,6 @@
          .{ "gobject", "gobject2" },
          .{ "graphene", "graphene1" },
          .{ "gtk", "gtk4" },
@@ -37,17 +55,17 @@
      };
      inline for (gobject_imports) |import| {
          const name, const module = import;
-@@ -762,6 +772,13 @@
-         step.root_module.addImport(
+@@ -763,6 +787,13 @@
              "gdk_x11",
              gobject.module("gdkx114"),
-+        );
+         );
 +
 +        // The xlib bindings link libX11, which doesn't exist on
 +        // non-X11 platforms such as Windows.
 +        step.root_module.addImport(
 +            "xlib",
 +            gobject.module("xlib2"),
-         );
++        );
      }
  
+     if (self.config.wayland) wayland: {

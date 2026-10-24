@@ -1,0 +1,153 @@
+--- a/src/renderer/opengl/Target.zig
++++ b/src/renderer/opengl/Target.zig
+@@ -24,6 +24,7 @@
+ const gl = @import("opengl");
+ const egl = gl.egl;
+ const Dmabuf = @import("../Dmabuf.zig");
++const d3d12 = @import("d3d12.zig");
+ 
+ const log = std.log.scoped(.opengl);
+ 
+@@ -33,6 +34,9 @@
+     width: usize,
+     /// Desired height
+     height: usize,
++    /// On Windows, Mesa's D3D12 device to back `export_texture` with a
++    /// shared resource on, see d3d12.zig.
++    d3d12_device: ?*d3d12.Device = null,
+ };
+ 
+ /// The framebuffer we render to.
+@@ -47,6 +51,9 @@
+ export_texture: gl.Texture,
+ export_framebuffer: gl.Framebuffer,
+ 
++/// The shared D3D12 resource backing `export_texture`, if any.
++d3d12_texture: ?d3d12.SharedTexture,
++
+ /// Current width of this target.
+ width: usize,
+ /// Current height of this target.
+@@ -93,6 +100,8 @@
+     // --- Export texture (plain RGBA8, for dma-buf export) ---
+     const export_texture = try gl.Texture.create();
+     errdefer export_texture.destroy();
++    var d3d12_texture: ?d3d12.SharedTexture = null;
++    errdefer if (d3d12_texture) |v| v.deinit();
+     {
+         const bound_tex = try export_texture.bind(.@"2d");
+         defer bound_tex.unbind();
+@@ -100,7 +109,14 @@
+         try bound_tex.parameter(.mag_filter, .nearest);
+         try bound_tex.parameter(.wrap_s, .clamp_to_edge);
+         try bound_tex.parameter(.wrap_t, .clamp_to_edge);
+-        try bound_tex.image2D(
++        if (opts.d3d12_device) |device| {
++            // Fixes for Windows: every frame is read back and composited on the CPU
++            d3d12_texture = d3d12.SharedTexture.init(device, opts.width, opts.height) catch |err| shared: {
++                log.warn("failed to share export texture via D3D12 err={}", .{err});
++                break :shared null;
++            };
++        }
++        if (d3d12_texture == null) try bound_tex.image2D(
+             0,
+             .rgba,
+             @intCast(opts.width),
+@@ -133,6 +149,7 @@
+         .texture = texture,
+         .export_framebuffer = export_fbo,
+         .export_texture = export_texture,
++        .d3d12_texture = d3d12_texture,
+         .width = opts.width,
+         .height = opts.height,
+     };
+@@ -143,6 +160,7 @@
+     self.texture.destroy();
+     self.export_framebuffer.destroy();
+     self.export_texture.destroy();
++    if (self.d3d12_texture) |v| v.deinit();
+ }
+ 
+ pub fn exportDmabuf(
+@@ -150,33 +168,7 @@
+     display: *egl.Display,
+     context: *egl.Context,
+ ) !Dmabuf {
+-    // We disable GL_FRAMEBUFFER_SRGB while doing this blit, otherwise
+-    // the values may be linearized as they're copied, but even though
+-    // the draw framebuffer has a linear internal format, the values in
+-    // it should be sRGB, not linear!
+-    try gl.disable(gl.c.GL_FRAMEBUFFER_SRGB);
+-    defer gl.enable(gl.c.GL_FRAMEBUFFER_SRGB) catch |err| {
+-        log.err("Error re-enabling GL_FRAMEBUFFER_SRGB, err={}", .{err});
+-    };
+-
+-    const read_bind = try self.framebuffer.bind(.read);
+-    defer read_bind.unbind();
+-
+-    const draw_bind = try self.export_framebuffer.bind(.draw);
+-    defer draw_bind.unbind();
+-
+-    try gl.blitFramebuffer(
+-        0,
+-        0,
+-        @intCast(self.width),
+-        @intCast(self.height),
+-        0,
+-        0,
+-        @intCast(self.width),
+-        @intCast(self.height),
+-        .{ .color_buffer_bit = true },
+-        .nearest,
+-    );
++    try self.blitExport();
+ 
+     const image: *egl.Image = try .create(
+         display,
+@@ -214,6 +206,46 @@
+     };
+ }
+ 
++/// Blit the frame into the shared export texture and return a new
++/// reference to its D3D12 resource, or null if this target isn't shared.
++pub fn exportD3d12(self: *const Self) !?*d3d12.Resource {
++    const shared = self.d3d12_texture orelse return null;
++    try self.blitExport();
++    d3d12.addRef(shared.resource);
++    return shared.resource;
++}
++
++/// Copy the rendered frame into `export_texture`.
++fn blitExport(self: *const Self) !void {
++    // We disable GL_FRAMEBUFFER_SRGB while doing this blit, otherwise
++    // the values may be linearized as they're copied, but even though
++    // the draw framebuffer has a linear internal format, the values in
++    // it should be sRGB, not linear!
++    try gl.disable(gl.c.GL_FRAMEBUFFER_SRGB);
++    defer gl.enable(gl.c.GL_FRAMEBUFFER_SRGB) catch |err| {
++        log.err("Error re-enabling GL_FRAMEBUFFER_SRGB, err={}", .{err});
++    };
++
++    const read_bind = try self.framebuffer.bind(.read);
++    defer read_bind.unbind();
++
++    const draw_bind = try self.export_framebuffer.bind(.draw);
++    defer draw_bind.unbind();
++
++    try gl.blitFramebuffer(
++        0,
++        0,
++        @intCast(self.width),
++        @intCast(self.height),
++        0,
++        0,
++        @intCast(self.width),
++        @intCast(self.height),
++        .{ .color_buffer_bit = true },
++        .nearest,
++    );
++}
++
+ /// Read the current contents of the framebuffer into CPU memory.
+ ///
+ /// This is used by the CPU readback presentation fallback. The

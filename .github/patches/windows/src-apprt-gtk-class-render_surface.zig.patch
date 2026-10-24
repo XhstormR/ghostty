@@ -1,0 +1,66 @@
+--- a/src/apprt/gtk/class/render_surface.zig
++++ b/src/apprt/gtk/class/render_surface.zig
+@@ -160,10 +160,10 @@
+                     // incompatible format modifier on multi-GPU setups.
+                     // Report unhealthy presentation health so the
+                     // renderer presents via CPU readback instead.
+-                    error.DmabufBuildFailed => {
++                    error.DmabufBuildFailed, error.D3d12BuildFailed => {
+                         log.warn(
+-                            "failed to import dmabuf, asking renderer for CPU presentation",
+-                            .{},
++                            "failed to import frame err={}, asking renderer for CPU presentation",
++                            .{err},
+                         );
+                         core.reportPresentationHealth(.unhealthy);
+                     },
+@@ -308,7 +308,49 @@
+         switch (frame) {
+             .dmabuf => |dmabuf| try self.rebuildDmabufTexture(dmabuf),
+             .memory => |memory| try self.rebuildMemoryTexture(memory),
++            .d3d12 => |resource| {
++                // The texture takes its own reference to the resource.
++                defer frame.deinit();
++                try self.rebuildD3d12Texture(resource);
++            },
+         }
++    }
++
++    // GdkD3D12TextureBuilder is Windows-only, so the bindings lack it.
++    // It's a plain GObject, which is all we need.
++    const D3D12TextureBuilder = gobject.Object;
++    extern fn gdk_d3d12_texture_builder_new() *D3D12TextureBuilder;
++    extern fn gdk_d3d12_texture_builder_set_resource(self: *D3D12TextureBuilder, resource: *anyopaque) void;
++    extern fn gdk_d3d12_texture_builder_set_premultiplied(self: *D3D12TextureBuilder, premultiplied: c_int) void;
++    extern fn gdk_d3d12_texture_builder_build(
++        self: *D3D12TextureBuilder,
++        destroy: ?*const fn (?*anyopaque) callconv(.c) void,
++        data: ?*anyopaque,
++        err: *?*glib.Error,
++    ) ?*gdk.Texture;
++
++    /// Build a `GdkD3D12Texture` from the present and set it as our
++    /// current texture, unrefing any previous texture.
++    fn rebuildD3d12Texture(self: *Self, resource: *anyopaque) !void {
++        const priv = self.private();
++
++        const builder = gdk_d3d12_texture_builder_new();
++        defer builder.unref();
++        gdk_d3d12_texture_builder_set_resource(builder, resource);
++        gdk_d3d12_texture_builder_set_premultiplied(builder, 1);
++
++        var err_: ?*glib.Error = null;
++        const texture = gdk_d3d12_texture_builder_build(builder, null, null, &err_) orelse {
++            if (err_) |err| {
++                defer err.free();
++                log.warn("failed to build d3d12 texture err={s}", .{err.f_message orelse "(unknown)"});
++            }
++            return error.D3d12BuildFailed;
++        };
++
++        // Swap out the old texture.
++        if (priv.texture) |old| old.as(gobject.Object).unref();
++        priv.texture = texture;
+     }
+ 
+     /// Build a `GdkDmabufTexture` from the present and set it as our

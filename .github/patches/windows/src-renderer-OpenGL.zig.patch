@@ -8,7 +8,34 @@
  const std = @import("std");
  const Allocator = std.mem.Allocator;
  const gl = @import("opengl");
-@@ -173,6 +174,16 @@
+@@ -12,6 +13,7 @@
+ const rendererpkg = @import("../renderer.zig");
+ const Renderer = rendererpkg.GenericRenderer(OpenGL);
+ const Dmabuf = @import("Dmabuf.zig");
++const d3d12 = @import("opengl/d3d12.zig");
+ pub const Device = @import("opengl/Device.zig");
+ 
+ pub const GraphicsAPI = OpenGL;
+@@ -49,6 +51,10 @@
+ 
+ egl_context: *gl.egl.Context,
+ 
++/// On Windows, Mesa's D3D12 device that frames are shared with the apprt
++/// through. Null when sharing is unavailable.
++d3d12_device: ?*d3d12.Device,
++
+ pub fn init(
+     alloc: Allocator,
+     device: *const Device,
+@@ -86,6 +92,7 @@
+         .blending = opts.config.blending,
+         .device = device,
+         .egl_context = context,
++        .d3d12_device = if (builtin.os.tag == .windows) d3d12.init(display, context) else null,
+     };
+ }
+ 
+@@ -173,6 +180,16 @@
      errdefer gl.glad.unload();
      log.info("loaded OpenGL {}.{}", .{ major, minor });
  
@@ -25,7 +52,19 @@
      // Need to check version before trying to enable it
      if (major < MIN_VERSION_MAJOR or
          (major == MIN_VERSION_MAJOR and minor < MIN_VERSION_MINOR))
-@@ -280,8 +291,10 @@
+@@ -263,10 +280,10 @@
+ 
+ /// Initialize a new render target which can be presented by this API.
+ pub fn initTarget(self: *const OpenGL, width: usize, height: usize) !Target {
+-    _ = self;
+     return Target.init(.{
+         .width = width,
+         .height = height,
++        .d3d12_device = self.d3d12_device,
+     });
+ }
+ 
+@@ -280,8 +297,10 @@
      presentation_health: rendererpkg.Health,
  ) !ExportedFrame {
      // We only export DMABUFs when the apprt can present them.
@@ -38,3 +77,38 @@
          if (target.exportDmabuf(self.device.display, self.egl_context)) |dmabuf| {
              return .{ .dmabuf = dmabuf };
          } else |_| {
+@@ -289,6 +308,16 @@
+         }
+     }
+ 
++    // On Windows, share the frame as a D3D12 resource instead.
++    // Fixes for Windows: every frame is read back and composited on the CPU
++    if (builtin.os.tag == .windows and presentation_health == .healthy) {
++        if (target.exportD3d12()) |resource| {
++            if (resource) |v| return .{ .d3d12 = v };
++        } else |err| {
++            log.warn("failed to export D3D12 texture, falling back to CPU presentation err={}", .{err});
++        }
++    }
++
+     return .{ .memory = .{
+         .width = @intCast(target.width),
+         .height = @intCast(target.height),
+@@ -301,6 +330,9 @@
+ pub const ExportedFrame = union(enum) {
+     dmabuf: Dmabuf,
+     memory: Memory,
++    /// A shared D3D12 resource holding RGBA8 pixel data with premultiplied
++    /// alpha (Windows only). The frame owns one reference to it.
++    d3d12: *d3d12.Resource,
+ 
+     /// RGBA8 pixel data with premultiplied alpha, tightly packed
+     /// (`width * 4` bytes per row), in CPU memory.
+@@ -319,6 +351,7 @@
+         switch (self) {
+             .dmabuf => |v| v.deinit(),
+             .memory => |v| v.deinit(),
++            .d3d12 => |v| d3d12.release(v),
+         }
+     }
+ };

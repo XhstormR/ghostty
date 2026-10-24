@@ -1,0 +1,193 @@
+--- /dev/null
++++ b/src/renderer/opengl/d3d12.zig
+@@ -0,0 +1,190 @@
++//! Shares rendered frames with GTK through D3D12 resources (Windows only).
++//!
++//! On Windows, GTK only accepts GPU textures as `GdkD3D12Texture`, and GL
++//! can import external memory but not export it. So we create a shared
++//! D3D12 resource on the same device Mesa's d3d12 driver renders with,
++//! import it into GL with GL_EXT_memory_object_win32 as the storage of a
++//! render target's export texture, and hand the resource to GTK, whose
++//! Vulkan renderer imports it without a copy.
++const std = @import("std");
++const gl = @import("opengl");
++const egl = gl.egl;
++const c = @import("d3d12_c");
++
++const log = std.log.scoped(.opengl);
++
++pub const Device = c.ID3D12Device;
++pub const Resource = c.ID3D12Resource;
++
++/// Defined here rather than linking dxguid for a single GUID.
++const IID_ID3D12Resource: c.IID = .{
++    .Data1 = 0x696442be,
++    .Data2 = 0xa72e,
++    .Data3 = 0x4059,
++    .Data4 = .{ 0xbc, 0x79, 0x5b, 0x5c, 0x98, 0x04, 0x0f, 0xad },
++};
++
++/// winnt.h builds this with token pasting (`__MSABI_LONG`), which
++/// translate-c can't expand.
++const GENERIC_ALL = 0x10000000;
++
++/// `struct mesa_glinterop_device_info` from Mesa's GL/mesa_glinterop.h,
++/// up to version 2, which added the driver data.
++const InteropDeviceInfo = extern struct {
++    version: u32 = 2,
++    pci_segment_group: u32 = 0,
++    pci_bus: u32 = 0,
++    pci_device: u32 = 0,
++    pci_function: u32 = 0,
++    vendor_id: u32 = 0,
++    device_id: u32 = 0,
++    driver_data_size: u32,
++    driver_data: ?*anyopaque,
++};
++
++/// `struct d3d12_interop_device_info` from Mesa's d3d12_interop_public.h.
++const D3D12InteropDeviceInfo = extern struct {
++    adapter_luid: u64,
++    device: *Device,
++    queue: *anyopaque,
++};
++
++/// GL_EXT_memory_object(_win32) entry points, which glad doesn't load.
++const GlExt = struct {
++    CreateMemoryObjectsEXT: c.PFNGLCREATEMEMORYOBJECTSEXTPROC,
++    DeleteMemoryObjectsEXT: c.PFNGLDELETEMEMORYOBJECTSEXTPROC,
++    ImportMemoryWin32HandleEXT: c.PFNGLIMPORTMEMORYWIN32HANDLEEXTPROC,
++    TexStorageMem2DEXT: c.PFNGLTEXSTORAGEMEM2DEXTPROC,
++};
++
++/// Loaded by the first `init`, on the main thread before any render
++/// thread starts, and never written again.
++var gl_ext: ?GlExt = null;
++
++/// Returns Mesa's D3D12 device for `context`, or null if frames can't be
++/// shared, in which case the renderer presents via CPU readback.
++pub fn init(display: *egl.Display, context: *egl.Context) ?*Device {
++    if (gl_ext == null) {
++        var ext: GlExt = undefined;
++        inline for (@typeInfo(GlExt).@"struct".field_names) |name| {
++            const proc = egl.getProcAddress(std.fmt.comptimePrint("gl{s}", .{name})) orelse {
++                log.warn("GL_EXT_memory_object_win32 is unavailable, presenting via CPU readback", .{});
++                return null;
++            };
++            @field(ext, name) = @ptrCast(proc);
++        }
++        gl_ext = ext;
++    }
++
++    const query: *const fn (
++        display: *egl.Display,
++        context: *egl.Context,
++        out: *InteropDeviceInfo,
++    ) callconv(.c) c_int = @ptrCast(egl.getProcAddress("eglGLInteropQueryDeviceInfoMESA") orelse {
++        log.warn("MESA_GLInterop is unavailable, presenting via CPU readback", .{});
++        return null;
++    });
++
++    var driver: D3D12InteropDeviceInfo = undefined;
++    var info: InteropDeviceInfo = .{
++        .driver_data_size = @sizeOf(D3D12InteropDeviceInfo),
++        .driver_data = &driver,
++    };
++    const rc = query(display, context, &info);
++    if (rc != 0 or info.version < 2 or info.driver_data_size < @sizeOf(D3D12InteropDeviceInfo)) {
++        log.warn(
++            "Mesa did not report its D3D12 device, presenting via CPU readback rc={} version={} size={}",
++            .{ rc, info.version, info.driver_data_size },
++        );
++        return null;
++    }
++
++    log.info("presenting via D3D12 shared textures adapter_luid=0x{x}", .{driver.adapter_luid});
++    return driver.device;
++}
++
++pub fn addRef(resource: *Resource) void {
++    _ = resource.lpVtbl.*.AddRef.?(resource);
++}
++
++pub fn release(resource: *Resource) void {
++    _ = resource.lpVtbl.*.Release.?(resource);
++}
++
++/// A shared D3D12 resource imported into GL as the storage of the
++/// currently bound `GL_TEXTURE_2D`.
++pub const SharedTexture = struct {
++    resource: *Resource,
++    memory: c.GLuint,
++
++    pub fn init(device: *Device, width: usize, height: usize) !SharedTexture {
++        const ext = gl_ext.?;
++
++        var resource: *Resource = undefined;
++        if (device.lpVtbl.*.CreateCommittedResource.?(
++            device,
++            &.{
++                .Type = c.D3D12_HEAP_TYPE_DEFAULT,
++                .CPUPageProperty = c.D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
++                .MemoryPoolPreference = c.D3D12_MEMORY_POOL_UNKNOWN,
++                .CreationNodeMask = 0,
++                .VisibleNodeMask = 0,
++            },
++            c.D3D12_HEAP_FLAG_SHARED,
++            &.{
++                .Dimension = c.D3D12_RESOURCE_DIMENSION_TEXTURE2D,
++                .Alignment = 0,
++                .Width = width,
++                .Height = @intCast(height),
++                .DepthOrArraySize = 1,
++                .MipLevels = 1,
++                .Format = c.DXGI_FORMAT_R8G8B8A8_UNORM,
++                .SampleDesc = .{ .Count = 1, .Quality = 0 },
++                .Layout = c.D3D12_TEXTURE_LAYOUT_UNKNOWN,
++                // GTK samples the texture from another device's queue,
++                // which requires simultaneous access or the COMMON state.
++                .Flags = c.D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET |
++                    c.D3D12_RESOURCE_FLAG_ALLOW_SIMULTANEOUS_ACCESS,
++            },
++            c.D3D12_RESOURCE_STATE_COMMON,
++            null,
++            &IID_ID3D12Resource,
++            @ptrCast(&resource),
++        ) < 0) return error.D3D12CreateResourceFailed;
++        errdefer release(resource);
++
++        var handle: c.HANDLE = undefined;
++        if (device.lpVtbl.*.CreateSharedHandle.?(
++            device,
++            @ptrCast(resource),
++            null,
++            GENERIC_ALL,
++            null,
++            &handle,
++        ) < 0) return error.D3D12CreateSharedHandleFailed;
++        // Importing opens its own reference to the resource.
++        defer _ = c.CloseHandle(handle);
++
++        var memory: c.GLuint = 0;
++        ext.CreateMemoryObjectsEXT.?(1, &memory);
++        errdefer ext.DeleteMemoryObjectsEXT.?(1, &memory);
++        ext.ImportMemoryWin32HandleEXT.?(memory, 0, c.GL_HANDLE_TYPE_D3D12_RESOURCE_EXT, handle);
++        ext.TexStorageMem2DEXT.?(
++            c.GL_TEXTURE_2D,
++            1,
++            c.GL_RGBA8,
++            @intCast(width),
++            @intCast(height),
++            memory,
++            0,
++        );
++        try gl.errors.getError();
++
++        return .{ .resource = resource, .memory = memory };
++    }
++
++    pub fn deinit(self: *const SharedTexture) void {
++        gl_ext.?.DeleteMemoryObjectsEXT.?(1, &self.memory);
++        release(self.resource);
++    }
++};

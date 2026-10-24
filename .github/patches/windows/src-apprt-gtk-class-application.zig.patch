@@ -64,21 +64,29 @@
      };
  
      const gdk_disable: struct {
-@@ -3256,7 +3267,12 @@
+@@ -3256,8 +3267,20 @@
          // Disabling Vulkan also saves hundreds of milliseconds of initialization
          // time on certain systems.
          vulkan: bool = true,
 -    } = .{};
++        egl: bool = false,
 +    } = .{
 +        // On Windows, keep Vulkan available so users can pick the renderer
 +        // with GSK_RENDERER: vulkan (our default, see below), gl or cairo.
 +        // Fixes for Windows: warning(glib): WARNING: Gsk: Failed to realize renderer 'GskVulkanRenderer' for surface 'GdkWin32Toplevel': Vulkan support disabled via GDK_DISABLE
 +        .vulkan = builtin.os.tag != .windows,
-+    };
  
++        // GTK falls back to EGL when WGL is unavailable (no GPU driver),
++        // but its Win32 EGL backend never sets a native window, so every
++        // frame fails to draw. Without EGL, GSK falls back to Cairo instead.
++        // Fixes for Windows: error(glib): CRITICAL: Gdk: gdk_gl_context_ensure_egl_surface: assertion 'priv->egl_native_window != NULL' failed
++        .egl = builtin.os.tag == .windows,
++    };
++
      {
          var buf: [1024]u8 = undefined;
-@@ -3272,7 +3288,7 @@
+         var writer: std.Io.Writer = .fixed(&buf);
+@@ -3272,7 +3295,7 @@
          try writer.writeByte(0);
          const value = writer.buffered();
          log.warn("setting GDK_DEBUG={s}", .{value[0 .. value.len - 1]});
@@ -87,14 +95,14 @@
      }
  
      {
-@@ -3289,7 +3305,17 @@
+@@ -3289,9 +3312,19 @@
          try writer.writeByte(0);
          const value = writer.buffered();
          log.warn("setting GDK_DISABLE={s}", .{value[0 .. value.len - 1]});
 -        _ = setenv("GDK_DISABLE", @ptrCast(value[0 .. value.len - 1 :0]), 1);
 +        _ = glib.setenv("GDK_DISABLE", value[0 .. value.len - 1 :0], 1);
-+    }
-+
+     }
+ 
 +    // On Windows, GSK prefers its OpenGL renderer. Default to its Vulkan
 +    // renderer instead, unless the user picked one. If Vulkan fails to
 +    // realize, GSK still falls back to OpenGL and then Cairo.
@@ -103,6 +111,8 @@
 +            log.warn("setting GSK_RENDERER=vulkan", .{});
 +            _ = glib.setenv("GSK_RENDERER", "vulkan", 0);
 +        }
-     }
- 
++    }
++
      // Sync environ after altering system env
+     global.syncEnviron();
+ }
