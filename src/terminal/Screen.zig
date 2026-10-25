@@ -1732,11 +1732,19 @@ pub inline fn eraseHistory(
     bl: ?point.Point,
 ) void {
     defer self.assertIntegrity();
+
+    // Placements anchored in the erased rows are removed first, while
+    // their pins still identify those rows. Erasing moves those pins to
+    // the top-left of the retained rows rather than marking them garbage.
+    if (comptime build_options.kitty_graphics) {
+        self.kitty_images.eraseHistory(self.io, self, bl);
+    }
+
     self.pages.eraseHistory(bl);
     self.cursorReload();
 
-    // Erasing rows removes placements attached to them and shifts the
-    // ones below, so placements may have moved.
+    // Erasing rows shifts the placements below them, so placements may
+    // have moved.
     if (comptime build_options.kitty_graphics) self.kitty_images.markDirty();
 }
 
