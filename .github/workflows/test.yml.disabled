@@ -116,6 +116,7 @@ jobs:
       - test-fuzz-libghostty
       - test-kaitai
       - test-lib-vt
+      - test-lib-vt-freebsd
       - test-lib-vt-pkgconfig
       - test-macos
       - pinact
@@ -170,7 +171,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -228,7 +229,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -243,7 +244,7 @@ jobs:
 
   build-example-zig-vt-macos-no-sdk:
     name: Example zig-vt (macOS, no SDK)
-    runs-on: namespace-profile-ghostty-macos-tahoe
+    runs-on: namespace-profile-ghostty-macos-golden
     needs: test
     env:
       ZIG_LOCAL_CACHE_DIR: /Users/runner/zig/local-cache
@@ -296,7 +297,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -344,7 +345,7 @@ jobs:
       matrix:
         dir: ${{ fromJSON(needs.list-examples.outputs.swift) }}
     name: Example ${{ matrix.dir }}
-    runs-on: namespace-profile-ghostty-macos-tahoe
+    runs-on: namespace-profile-ghostty-macos-golden
     needs: [test, list-examples]
     env:
       ZIG_LOCAL_CACHE_DIR: /Users/runner/zig/local-cache
@@ -371,7 +372,7 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Xcode Select
-        run: sudo xcode-select -s /Applications/Xcode_26.6.app
+        run: sudo xcode-select -s /Applications/Xcode_27.1.app
 
       - name: Build XCFramework
         run: nix develop -c zig build -Demit-lib-vt
@@ -402,7 +403,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -440,7 +441,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -557,7 +558,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -591,7 +592,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -614,6 +615,8 @@ jobs:
             aarch64-linux,
             x86_64-linux,
             x86_64-linux-musl,
+            aarch64-freebsd,
+            x86_64-freebsd,
             x86_64-windows-gnu,
             # doesn't work yet, we need a way to find msvc libc/c++ headers
             # x86_64-windows-msvc
@@ -635,7 +638,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -672,7 +675,7 @@ jobs:
             /nix
             /zig
 
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -705,7 +708,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -796,7 +799,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -843,7 +846,7 @@ jobs:
             platform: 7
             arch: arm64
             expect_encryption: false
-    runs-on: namespace-profile-ghostty-macos-tahoe
+    runs-on: namespace-profile-ghostty-macos-golden
     needs: test
     env:
       ZIG_LOCAL_CACHE_DIR: /Users/runner/zig/local-cache
@@ -870,7 +873,7 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Xcode Select
-        run: sudo xcode-select -s /Applications/Xcode_26.6.app
+        run: sudo xcode-select -s /Applications/Xcode_27.1.app
 
       - name: Build
         run: |
@@ -909,7 +912,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1001,7 +1004,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1030,7 +1033,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1063,7 +1066,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1145,7 +1148,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1185,7 +1188,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1246,14 +1249,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # build-nix-macos:
-  #   runs-on: namespace-profile-ghostty-macos-tahoe
+  #   runs-on: namespace-profile-ghostty-macos-golden
   #   needs: test
   #   steps:
   #     - name: Checkout code
   #       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
   #     # Install Nix and use that to run our tests so our environment matches exactly.
-  #     - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+  #     - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
   #       with:
   #         nix_path: nixpkgs=channel:nixos-unstable
   #     - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1298,7 +1301,7 @@ jobs:
   #         nix build .#libghostty-vt-debug-no-simd.tests.build-example-c-vt-build-info
 
   build-macos:
-    runs-on: namespace-profile-ghostty-macos-tahoe
+    runs-on: namespace-profile-ghostty-macos-golden
     needs: test
     env:
       ZIG_LOCAL_CACHE_DIR: /Users/runner/zig/local-cache
@@ -1325,7 +1328,7 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Xcode Select
-        run: sudo xcode-select -s /Applications/Xcode_26.6.app
+        run: sudo xcode-select -s /Applications/Xcode_27.1.app
 
       - name: Xcode Version
         run: xcodebuild -version
@@ -1350,7 +1353,7 @@ jobs:
             COMPILATION_CACHE_KEEP_CAS_DIRECTORY=YES
 
   build-macos-xcode-27:
-    runs-on: namespace-profile-ghostty-macos-tahoe
+    runs-on: namespace-profile-ghostty-macos-golden
     needs: test
     env:
       ZIG_LOCAL_CACHE_DIR: /Users/runner/zig/local-cache
@@ -1377,7 +1380,7 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Xcode Select
-        run: sudo xcode-select -s /Applications/Xcode_27.app
+        run: sudo xcode-select -s /Applications/Xcode_27.1.app
 
       - name: Xcode Version
         run: xcodebuild -version
@@ -1390,7 +1393,7 @@ jobs:
         run: nix develop -c zig build --system ${{ steps.deps.outputs.deps }} -Demit-macos-app=false
 
   build-macos-freetype:
-    runs-on: namespace-profile-ghostty-macos-tahoe
+    runs-on: namespace-profile-ghostty-macos-golden
     needs: test
     env:
       ZIG_LOCAL_CACHE_DIR: /Users/runner/zig/local-cache
@@ -1417,7 +1420,7 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Xcode Select
-        run: sudo xcode-select -s /Applications/Xcode_26.6.app
+        run: sudo xcode-select -s /Applications/Xcode_27.1.app
 
       - name: Xcode Version
         run: xcodebuild -version
@@ -1462,7 +1465,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1519,7 +1522,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1532,6 +1535,101 @@ jobs:
 
       - name: Validate native ABI manifest
         run: nix develop -c zig build test-lib-vt-schema
+
+  # Runs the libghostty-vt tests on FreeBSD 15.1 amd64, in a QEMU virtual
+  # machine (VM). A container cannot run FreeBSD, because containers share
+  # the host's Linux kernel. Namespace's Linux runners have KVM, Linux's
+  # hardware virtualization, so the VM runs at close to native speed. The
+  # tests are built for FreeBSD in the dev shell and copied into the VM,
+  # which has no Zig toolchain.
+  #
+  # Three caches keep later runs fast. /zig holds Zig's build cache, so an
+  # unchanged test binary is not rebuilt. /nix holds QEMU and the dev shell.
+  # /freebsd-vm holds the FreeBSD image and the VM's set-up disk, so only the
+  # first run downloads FreeBSD and waits for its first boot.
+  #
+  # .github/scripts/freebsd-vm/vm.sh does the work. Its help text explains
+  # how to run the same steps on your own computer.
+  test-lib-vt-freebsd:
+    if: github.repository == 'ghostty-org/ghostty' && needs.skip.outputs.skip != 'true'
+    needs: skip
+    runs-on: namespace-profile-ghostty-md
+    timeout-minutes: 45
+    env:
+      ZIG_LOCAL_CACHE_DIR: /zig/local-cache
+      ZIG_GLOBAL_CACHE_DIR: /zig/global-cache
+      GHOSTTY_FREEBSD_VM_ARCH: amd64
+      GHOSTTY_FREEBSD_VM_RELEASE: "15.1"
+      GHOSTTY_FREEBSD_VM_DIR: /freebsd-vm
+      # Set here rather than left to the script's default, so a change to
+      # the default does not silently change CI.
+      GHOSTTY_FREEBSD_VM_TEST_TIMEOUT: "1800"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Cache
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          path: |
+            /nix
+            /zig
+            /freebsd-vm
+
+      # Install Nix and use that to run our tests so our environment matches exactly.
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: ghostty
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+
+      # vm.sh quietly falls back to software emulation when it cannot use
+      # KVM, which would make this job many times slower. Fail early
+      # instead. The VM gets every CPU and three quarters of the runner's
+      # memory, leaving the rest for QEMU itself and the host.
+      - name: Check KVM and size the VM
+        run: |
+          if [ ! -w /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+          fi
+          if [ ! -w /dev/kvm ]; then
+            echo "::error title=No KVM::/dev/kvm is missing or not writable"
+            exit 1
+          fi
+          mem_mib=$(awk '/^MemTotal:/ { print int($2 / 1024) }' /proc/meminfo)
+          echo "GHOSTTY_FREEBSD_VM_CPUS=$(nproc)" >> "$GITHUB_ENV"
+          echo "GHOSTTY_FREEBSD_VM_MEMORY=$((mem_mib * 3 / 4))" >> "$GITHUB_ENV"
+          echo "runner: $(nproc) CPUs, $mem_mib MiB"
+
+      # Builds ghostty-vt-c-test into zig-out/bin, where vm.sh test looks
+      # for it. It runs every libghostty-vt test, the Zig ones included.
+      - name: Build the test binary
+        run: |
+          nix develop -c zig build test-lib-vt-build \
+            -Demit-lib-vt \
+            -Demit-test-exe \
+            -Dtarget=x86_64-freebsd
+
+      # setup does nothing once the cache volume holds a set-up VM. reset
+      # then undoes whatever the last run's tests left on the VM's disk.
+      - name: Set up the VM
+        run: |
+          nix develop -c .github/scripts/freebsd-vm/vm.sh setup
+          nix develop -c .github/scripts/freebsd-vm/vm.sh reset
+
+      - name: Start the VM
+        run: nix develop -c .github/scripts/freebsd-vm/vm.sh start
+
+      - name: Test on FreeBSD
+        run: nix develop -c .github/scripts/freebsd-vm/vm.sh test
+
+      # Shut down from inside the VM, even after a failure, so the disk on
+      # the cache volume is never saved half written.
+      - name: Stop the VM
+        if: ${{ always() }}
+        run: nix develop -c .github/scripts/freebsd-vm/vm.sh stop
 
   # Runs esctest against libghostty-vt. Report-only: many tests fail today,
   # so this never fails and isn't in the required checks. See
@@ -1556,7 +1654,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1608,7 +1706,7 @@ jobs:
           path: /nix
 
       # Install Nix so the verifier uses the pinned compiler and runtimes.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1643,7 +1741,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1691,7 +1789,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1726,7 +1824,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1739,7 +1837,7 @@ jobs:
           nix develop -c zig build -Dsentry=${{ matrix.sentry }}
 
   test-macos:
-    runs-on: namespace-profile-ghostty-macos-tahoe
+    runs-on: namespace-profile-ghostty-macos-golden
     needs: test
     env:
       ZIG_LOCAL_CACHE_DIR: /Users/runner/zig/local-cache
@@ -1766,7 +1864,7 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Xcode Select
-        run: sudo xcode-select -s /Applications/Xcode_26.6.app
+        run: sudo xcode-select -s /Applications/Xcode_27.1.app
 
       - name: Xcode Version
         run: xcodebuild -version
@@ -1801,7 +1899,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1832,7 +1930,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1863,7 +1961,7 @@ jobs:
           path: |
             /nix
             /zig
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1894,7 +1992,7 @@ jobs:
           path: |
             /nix
             /zig
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1924,7 +2022,7 @@ jobs:
           path: |
             /nix
             /zig
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -1938,7 +2036,7 @@ jobs:
 
   swiftlint:
     if: github.repository == 'ghostty-org/ghostty' && needs.skip.outputs.skip != 'true' && needs.skip.outputs.macos == 'true'
-    runs-on: namespace-profile-ghostty-macos-tahoe
+    runs-on: namespace-profile-ghostty-macos-golden
     needs: skip
     timeout-minutes: 60
     steps:
@@ -1982,7 +2080,7 @@ jobs:
           path: |
             /nix
             /zig
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -2010,7 +2108,7 @@ jobs:
           path: |
             /nix
             /zig
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -2038,7 +2136,7 @@ jobs:
           path: |
             /nix
             /zig
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -2071,7 +2169,7 @@ jobs:
           path: |
             /nix
             /zig
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -2099,7 +2197,7 @@ jobs:
           path: |
             /nix
             /zig
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -2140,7 +2238,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
@@ -2202,7 +2300,7 @@ jobs:
             /zig
 
       # Install Nix and use that to run our tests so our environment matches exactly.
-      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
         with:
           nix_path: nixpkgs=channel:nixos-unstable
       - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17

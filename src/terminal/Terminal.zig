@@ -279,6 +279,8 @@ pub const Cursor = struct {
 };
 
 pub const Options = struct {
+    /// The size of the terminal grid in cells. Both must be at least 1,
+    /// otherwise `init` returns `error.InvalidValue`.
     cols: size.CellCountInt,
     rows: size.CellCountInt,
 
@@ -325,7 +327,20 @@ pub const Options = struct {
         void = if (build_options.kitty_graphics) .direct else {},
 };
 
-/// Initialize a new terminal.
+/// Initialize a new terminal with the given options.
+///
+/// The returned terminal owns its memory. Call `deinit` with the same
+/// allocator when you are done with it.
+///
+/// ```zig
+/// var t: Terminal = try .init(io, alloc, .{ .cols = 80, .rows = 24 });
+/// defer t.deinit(alloc);
+/// ```
+///
+/// Returns `error.InvalidValue` if `cols` or `rows` is zero. This check
+/// happens before anything is allocated. If the size comes from an
+/// untrusted source, you can rely on this check instead of validating
+/// it yourself.
 pub fn init(
     io_impl: std.Io,
     alloc: Allocator,
@@ -333,6 +348,10 @@ pub fn init(
 ) !Terminal {
     const cols = opts.cols;
     const rows = opts.rows;
+
+    // The screens and scrolling region need at least one row and column.
+    // Check this before allocating so there is nothing to clean up.
+    if (cols == 0 or rows == 0) return error.InvalidValue;
 
     var screen_set: ScreenSet = try .init(io_impl, alloc, .{
         .cols = cols,
@@ -4517,6 +4536,20 @@ test "Terminal: resize rejects zero dimensions before mutation" {
     try testing.expectEqual(@as(u32, 100), t.width_px);
     try testing.expectEqual(@as(u32, 100), t.height_px);
     try testing.expect(!t.flags.dirty.clear);
+}
+
+test "Terminal: init rejects zero dimensions" {
+    const alloc = testing.allocator;
+    const io_impl = testing.io;
+
+    try testing.expectError(error.InvalidValue, init(io_impl, alloc, .{
+        .cols = 0,
+        .rows = 5,
+    }));
+    try testing.expectError(error.InvalidValue, init(io_impl, alloc, .{
+        .cols = 10,
+        .rows = 0,
+    }));
 }
 
 test "Terminal: resize preserves pixel dimensions when omitted" {

@@ -31,7 +31,7 @@
 in
   stdenv.mkDerivation (finalAttrs: {
     pname = "ghostty";
-    version = "1.3.2-dev+${revision}-nix";
+    version = "1.4.1-dev+${revision}-nix";
 
     # We limit source like this to try and reduce the amount of rebuilds as possible
     # thus we only provide the source that is needed for the build

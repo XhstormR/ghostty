@@ -178,6 +178,7 @@ hulet
 i999rri
 ibaios
 icodesign
+-ifmael
 illiakrauchanka
 j-c-m
 j0hnm4r5
@@ -224,6 +225,7 @@ kristofersoler
 kylesower
 laxystem
 lebdron
+lehni
 lepips
 liby
 linustalacko
@@ -339,6 +341,7 @@ robmorgan
 rockorager
 ronijacobson
 rpfaeffle
+rtgibbons
 ruoyouz
 ruseel
 sahilkmishra
